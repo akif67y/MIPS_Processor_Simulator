@@ -23,6 +23,8 @@ every small detailed and build a complete visualization.
 so show every case of forwarding like this.
 Now build this simulation of forwarding, hazard detection unit, stalls.
 along with this big pc, a line by line IF-ID-.. like simulation will also be shown. current version already support this. you can reuse it.
+
+(Task 1 done by Claude Bro)
 Later Tasks: 
 Then we will handle the case of control hazards like this in details. then we will handle stalls there as well
 Then we will try the other variation[with forwarding, without forwarding etc]. it will be customizable, users will be able to try different variation by clicking add to add units 
