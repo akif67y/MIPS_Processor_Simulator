@@ -1,122 +1,435 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { PipelineDatapath } from '../pipeline/PipelineDatapath'
+import { instrColor, tint } from '../pipeline/colors'
 import { EXAMPLES } from '../pipeline/examples'
-import { dependencies, hex, NAMES, parseInitial, parseProgram, regName, simulate, wbValue, type Frame, type Packet, type Simulation } from '../pipeline/engine'
+import { buildSteps, controlText, explain, PHASES, type Line, type Step } from '../pipeline/explain'
+import { dependences, destination, hex, NAMES, parseInitial, parseProgram, regName, simulate, type Controls, type Cycle, type Instr, type Latches, type Simulation } from '../pipeline/engine'
 import './pipeline.css'
 
-const name = (p: Packet | null) => p?.ins ? `I${p.ins.id + 1}: ${p.ins.text}` : p?.bubble ? `Bubble B${p.bubble}` : 'Empty'
-const value = (n: number) => `${n} (${hex(n)})`
-function packetFields(p: Packet | null, stage: number): [string, string][] {
-  if (!p) return [['Valid', '0 — empty']]
-  const i = p.ins
-  const fields: [string, string][] = [['Valid', i ? '1' : '0 — bubble'], ['PC + 4', hex(p.pc4)]]
-  if (stage <= 1) fields.push(['rs / rt / destination', i ? `${regName(i.rs)} / ${regName(i.rt)} / ${regName(i.dest)}` : '—'], ['Immediate (extended)', String(i?.imm ?? 0)])
-  if (stage === 1) fields.push(['Read data 1 (latched)', value(p.a)], ['Read data 2 (latched)', value(p.b)])
-  if (stage >= 2) fields.push(['ALU result / address', value(p.result)], ['Destination', i ? regName(i.dest) : '—'])
-  if (stage === 2) fields.push(['Store data (latched)', value(p.store)], ['Store source rt', i ? regName(i.rt) : '—'])
-  if (stage === 3) fields.push(['Memory read data', value(p.loaded)], ['WB mux output', value(wbValue(p))])
-  if (stage > 0) {
-    if (stage === 1) fields.push(['EX controls', `RegDst=${p.control.RegDst} ALUSrc=${p.control.ALUSrc} ALUOp=${p.control.ALUOp}`], ['ALU control (decoded)', p.control.ALUControl])
-    if (stage <= 2) fields.push(['MEM controls', `MemRead=${p.control.MemRead} MemWrite=${p.control.MemWrite}`])
-    fields.push(['WB controls', `RegWrite=${p.control.RegWrite} MemtoReg=${p.control.MemtoReg}`])
-  }
-  return fields
+/** Renders the explanation markup: `code` and **bold**. */
+function Md({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
+  return <>{parts.map((p, i) => p.startsWith('`') ? <code key={i}>{p.slice(1, -1)}</code> : p.startsWith('**') ? <b key={i}>{p.slice(2, -2)}</b> : <Fragment key={i}>{p}</Fragment>)}</>
 }
 
-function explain({ state: s, signals: g }: Frame, sim: Simulation): string[] {
-  const i = s.idex?.ins, d = s.ifid?.ins
-  const lines = [s.half === 0
-    ? g.wb ? `First half: WB will write ${regName(g.wb.dest)} = ${g.wb.value}. Click “Next half-cycle” to perform this write before ID reads.` : 'First half: no register write is enabled. $zero always remains 0.'
-    : g.wb ? `Second half: ${regName(g.wb.dest)} now contains ${g.wb.value}. ID reads the updated register file in this half of the same cycle.` : 'Second half: ID reads the register file. EX and MEM results are ready for the next clock edge.']
-  if (d) lines.push(`ID decodes I${d.id + 1}: rs ${regName(d.rs)} = ${g.decodeA}, rt ${regName(d.rt)} = ${g.decodeB}${s.half === 0 ? ' (reads are sampled in the second half)' : ''}. ${d.usesB ? d.op === 'sw' ? 'rt is store data, needed in MEM.' : 'Both source operands are needed in EX.' : 'rt is not an EX source; a matching destination alone cannot cause a stall.'}`)
-  if (g.stall) lines.push(`Load-use hazard: ID/EX.MemRead=1 and destination ${regName(i!.dest)} matches IF/ID.${g.matchA && g.matchB ? 'rs and rt' : g.matchA ? 'rs' : 'rt'}. Set PCWrite=0 and IF/IDWrite=0. At the next edge keep PC=${s.pc}, keep ${name(s.ifid)}, and replace ID/EX with a bubble whose EX/MEM/WB controls are all zero. The load and older instructions continue.`)
-  else if (s.idex?.bubble) lines.push(`Bubble B${s.idex.bubble} occupies EX with zero controls. The previous load is now reading memory. The held consumer can leave ID at the next edge; then MEM/WB can forward the load value into EX.`)
-  if (i) {
-    for (const [field, used, sel, r] of [['A', i.usesA, g.a, i.rs], ['B', i.usesB, g.b, i.rt]] as const) {
-      if (used) lines.push(sel.pending ? `Store data ${regName(r)} is not ready yet. The newer load in EX/MEM blocks any older value. Carry the store forward; the MEM/WB → memory path will supply the data in its MEM stage.` : `Forward${field}=${sel.select}: ${regName(r)} takes ${sel.value} from ${sel.source}.${sel.priority ? ' Both writers match: EX/MEM is newer, so the older MEM/WB value is rejected.' : ''}`)
+function Chip({ i, bubble }: { i: Instr | null | undefined; bubble?: boolean }) {
+  if (!i) return <span className="pl-chip empty">empty</span>
+  if (bubble) return <span className="pl-chip bubble">bubble</span>
+  return <span className="pl-chip" style={{ background: instrColor(i) }}>I{i.id + 1}</span>
+}
+
+// ---------- program overview ----------
+
+function Overview({ sim }: { sim: Simulation }) {
+  const deps = dependences(sim)
+  const merged = deps.filter((d, k) => !deps.slice(0, k).some((e) => e.consumer === d.consumer && e.producer === d.producer && e.reg === d.reg))
+  const stallCycles = sim.cycles.filter((c) => c.hazard.stall)
+  const n = sim.program.length
+  const how = (d: (typeof deps)[number]) => {
+    const both = deps.filter((e) => e.consumer === d.consumer && e.producer === d.producer && e.reg === d.reg).length > 1
+    const role = both ? 'rs and rt' : d.role
+    const r = d.resolution
+    const via = r.kind === 'exmem' ? <span className="pl-tag ex">EX/MEM → EX (Forward = 10) in cycle {r.cycle}</span>
+      : r.kind === 'memwb' ? <span className="pl-tag mem">MEM/WB → EX (Forward = 01) in cycle {r.cycle}</span>
+      : r.kind === 'regfile-same' ? <span className="pl-tag rf">register file: written 1st half, read 2nd half of cycle {r.cycle}</span>
+      : <span className="pl-tag muted">register file (already written)</span>
+    return <li key={`${d.consumer}-${d.producer}-${d.reg}`}>
+      <Chip i={sim.program[d.consumer]} /> needs <b>{regName(d.reg)}</b> ({role}) from <Chip i={sim.program[d.producer]} />, {d.distance} instruction{d.distance > 1 ? 's' : ''} earlier
+      {d.stalls ? <> · <span className="pl-tag hazard">{d.stalls} stall{d.stalls > 1 ? 's' : ''} first</span></> : null} · {via}
+      {r.kind !== 'regfile' && r.kind !== 'regfile-same' && r.double ? <> · <span className="pl-tag ex">double data hazard</span></> : null}
+    </li>
+  }
+  return <section className="pl-overview">
+    <div>
+      <h2>The program</h2>
+      <table className="pl-program">
+        <thead><tr><th></th><th>Instruction</th><th>Address</th><th>Machine code</th><th>Writes</th></tr></thead>
+        <tbody>{sim.program.map((i) => <tr key={i.id}>
+          <td><Chip i={i} /></td><td><code>{i.text}</code></td><td>{i.id * 4}</td><td className="mono">{hex(i.word)}</td>
+          <td>{i.op === 'sw' ? <span className="muted">memory</span> : destination(i) ? regName(destination(i)) : <span className="muted">nothing ($zero)</span>}</td>
+        </tr>)}</tbody>
+      </table>
+      <p className="pl-total"><b>{5} + ({n} − 1) + {sim.stalls} stall{sim.stalls === 1 ? '' : 's'} = {sim.cycles.length} cycles</b> <span className="muted">(5 stages for the first instruction, 1 more per instruction, plus stalls)</span></p>
+    </div>
+    <div>
+      <h2>Hazards in this program</h2>
+      {merged.length ? <ul className="pl-deps">{merged.map(how)}</ul> : <p className="muted">No instruction reads a register written by an earlier instruction here, so there is nothing to forward.</p>}
+      {stallCycles.length > 0 && <>
+        <h3>Stalls</h3>
+        <ul className="pl-deps">{stallCycles.map((c) => <li key={c.n}>
+          <span className="pl-tag hazard">cycle {c.n}</span> <Chip i={c.at.ifid!.instr} /> waits in ID: <Chip i={c.at.idex!.instr} /> is a load into {regName(c.hazard.idexRt)} (slide 69)
+          {c.hazard.conservative ? <span className="muted"> — not a real dependence: rt is only the destination, but the unit compares numbers.</span> : null}
+        </li>)}</ul>
+      </>}
+    </div>
+  </section>
+}
+
+// ---------- pipeline register contents ----------
+
+type Row = [string, string]
+const ctrl3 = (c: Controls, op?: Instr['op']) => {
+  const t = controlText(c, op)
+  const get = (k: string) => t.match(new RegExp(`${k}=(\\w+)`))![1]
+  return {
+    WB: `RegWrite=${get('RegWrite')} MemtoReg=${get('MemtoReg')}`,
+    M: `MemRead=${get('MemRead')} MemWrite=${get('MemWrite')}`,
+    EX: `RegDst=${get('RegDst')} ALUOp=${get('ALUOp')} ALUSrc=${get('ALUSrc')}`,
+  }
+}
+function fields(l: Latches, key: 'pc' | 'ifid' | 'idex' | 'exmem' | 'memwb'): Row[] {
+  if (key === 'pc') return [['PC', `${l.pc}`]]
+  if (key === 'ifid') return l.ifid ? [['Instruction', `${hex(l.ifid.instr.word)}  ${l.ifid.instr.text}`], ['PC + 4', `${l.ifid.pc4}`]] : []
+  if (key === 'idex') {
+    const p = l.idex
+    if (!p) return []
+    const c = ctrl3(p.ctrl, p.bubble ? undefined : p.instr.op)
+    return [['WB', c.WB], ['M', c.M], ['EX', c.EX], ['PC + 4', `${p.pc4}`], ['Read data 1', `${p.data1}`], ['Read data 2', `${p.data2}`], ['Sign-extended imm', `${p.imm}`], ['RegisterRs', regName(p.rs)], ['RegisterRt', regName(p.rt)], ['RegisterRd', regName(p.rd)]]
+  }
+  if (key === 'exmem') {
+    const p = l.exmem
+    if (!p) return []
+    const c = ctrl3(p.ctrl, p.bubble ? undefined : p.instr.op)
+    return [['WB', c.WB], ['M', c.M], ['ALU result', `${p.aluResult}`], ['Write data', `${p.writeData}`], ['RegisterRd', regName(p.regRd)]]
+  }
+  const p = l.memwb
+  if (!p) return []
+  const c = ctrl3(p.ctrl, p.bubble ? undefined : p.instr.op)
+  return [['WB', c.WB], ['Read data', `${p.readData}`], ['ALU result', `${p.aluResult}`], ['RegisterRd', regName(p.regRd)]]
+}
+
+function Latch({ title, k, c, prev, edge }: { title: string; k: 'pc' | 'ifid' | 'idex' | 'exmem' | 'memwb'; c: Cycle; prev: Cycle | null; edge: boolean }) {
+  const now = fields(c.at, k), next = fields(c.next, k), before = prev ? fields(prev.at, k) : []
+  const pkt = k === 'pc' ? null : c.at[k]
+  const held = (k === 'pc' || k === 'ifid') && c.hazard.stall
+  const wasHeld = (k === 'pc' || k === 'ifid') && !!prev?.hazard.stall
+  const color = pkt && !('bubble' in pkt && pkt.bubble) ? instrColor(pkt.instr) : '#868e96'
+  const names = [...new Set([...now, ...next].map((r) => r[0]))]
+  return <article className={`pl-latch ${pkt && 'bubble' in pkt && pkt.bubble ? 'bubble' : ''} ${held ? 'held' : ''}`} style={{ borderTopColor: k === 'pc' ? '#343a40' : color }}>
+    <header>
+      <h3>{title}</h3>
+      {k !== 'pc' && <Chip i={pkt?.instr} bubble={!!pkt && 'bubble' in pkt && pkt.bubble} />}
+      {held && <span className="pl-tag hazard">write disabled: holds next edge</span>}
+      {edge && wasHeld && <span className="pl-tag hazard">held at this edge</span>}
+    </header>
+    <p className="pl-latch-who">{pkt ? ('bubble' in pkt && pkt.bubble ? `bubble (fields left over from ${pkt.instr.text})` : pkt.instr.text) : k === 'pc' ? 'program counter' : 'empty'}</p>
+    {names.length > 0 && <table>
+      <thead><tr><th>Field</th><th>Now</th><th>Next edge</th></tr></thead>
+      <tbody>{names.map((name) => {
+        const v = now.find((r) => r[0] === name)?.[1] ?? '—'
+        const nv = next.find((r) => r[0] === name)?.[1] ?? '—'
+        const b = before.find((r) => r[0] === name)?.[1] ?? '—'
+        return <tr key={name} className={edge && prev && b !== v ? 'changed' : ''}>
+          <th>{name}</th><td>{v}</td><td className={nv !== v ? 'differs' : 'same'}>{nv}</td>
+        </tr>
+      })}</tbody>
+    </table>}
+  </article>
+}
+
+// ---------- multi-cycle (timing) diagram ----------
+
+type Cell = { stage: string; repeat?: boolean }
+function TimingChart({ sim, cycle, onSeek }: { sim: Simulation; cycle: number; onSeek: (k: number) => void }) {
+  const rows: { key: string; label: string; instr?: Instr; bubble?: boolean }[] = []
+  const bubbleRows = new Map<number, number>() // stalled instruction id → bubble count
+  const cells = new Map<string, Map<number, Cell>>()
+  const put = (row: string, n: number, cell: Cell) => { if (!cells.has(row)) cells.set(row, new Map()); cells.get(row)!.set(n, cell) }
+  sim.cycles.forEach((c, k) => {
+    const prev = sim.cycles[k - 1]
+    if (c.fetch.instr) put(`i${c.fetch.instr.id}`, c.n, { stage: 'IF', repeat: prev?.fetch.instr?.id === c.fetch.instr.id })
+    if (c.at.ifid) put(`i${c.at.ifid.instr.id}`, c.n, { stage: 'ID', repeat: prev?.at.ifid?.instr.id === c.at.ifid.instr.id })
+    const st = [['EX', c.at.idex, 0], ['MEM', c.at.exmem, 1], ['WB', c.at.memwb, 2]] as const
+    for (const [stage, p, off] of st) {
+      if (!p) continue
+      if (p.bubble) {
+        const key = `b${c.n - off}`
+        if (off === 0) bubbleRows.set(p.instr.id, (bubbleRows.get(p.instr.id) ?? 0) + 1)
+        put(key, c.n, { stage })
+        if (off === 0) rows.push({ key, label: 'bubble', bubble: true, instr: p.instr })
+      } else put(`i${p.instr.id}`, c.n, { stage })
     }
-    lines.push(`EX computes ${s.idex!.control.ALUControl}(${g.a.value}, ${g.aluB}) = ${g.result}.${s.idex!.control.ALUSrc ? ' ALUSrc selects the extended immediate; ForwardB still feeds the separate store-data path when needed.' : ''}`)
+  })
+  const ordered: typeof rows = []
+  for (const i of sim.program) {
+    ordered.push(...rows.filter((r) => r.instr?.id === i.id))
+    ordered.push({ key: `i${i.id}`, label: i.text, instr: i })
   }
-  if (g.memoryRead !== null) lines.push(`MEM reads ${hex(s.exmem!.result)} → ${g.memoryRead}. This value reaches MEM/WB at the next edge; it cannot travel backward in time into this cycle’s EX stage.`)
-  if (s.exmem?.control.MemWrite) lines.push(`MEM will write ${g.store} to ${hex(s.exmem.result)} at the next edge, using ${g.storeForward ? 'the late MEM/WB → memory bypass' : 'the store data carried in EX/MEM'}.`)
-  if (sim.program[s.pc / 4]) lines.push(`IF fetches I${s.pc / 4 + 1} at ${hex(s.pc)}.${g.stall ? ' The fetch is repeated next cycle because PC and IF/ID are frozen.' : ` At the edge it enters IF/ID and PC advances to ${hex(s.pc + 4)}.`}`)
-  return lines
+  const LW = 210, CW = 62, RH = 36, TOP = 30
+  const N = sim.cycles.length
+  const rowOf = (key: string) => ordered.findIndex((r) => r.key === key)
+  const x = (n: number) => LW + (n - 1) * CW
+  const y = (r: number) => TOP + r * RH
+  const now = cycle + 1
+  // forwarding arrows (only those that matter)
+  const arrows: { x1: number; y1: number; x2: number; y2: number; kind: 'ex' | 'mem' | 'rf' }[] = []
+  for (const c of sim.cycles) {
+    const e = c.at.idex
+    if (e && !e.bubble && c.ex) {
+      for (const f of [c.ex.fa, c.ex.fb]) {
+        if (f.sel === '00' || (f.unused && e.instr.op !== 'sw')) continue
+        const src = f.sel === '10' ? c.at.exmem! : c.at.memwb!
+        const r1 = rowOf(`i${src.instr.id}`), r2 = rowOf(`i${e.instr.id}`)
+        const dx = f.field === 'Rs' ? 0 : 8
+        arrows.push({ x1: x(c.n) + 8 + dx, y1: y(r1) + RH - 6, x2: x(c.n) + 26 + dx, y2: y(r2) + 6, kind: f.sel === '10' ? 'ex' : 'mem' })
+      }
+    }
+    if (c.id && c.wb?.writes && (c.id.sameCycleRs || c.id.sameCycleRt)) {
+      const r1 = rowOf(`i${c.at.memwb!.instr.id}`), r2 = rowOf(`i${c.id.instr.id}`)
+      arrows.push({ x1: x(c.n) + CW * 0.3, y1: y(r1) + RH - 6, x2: x(c.n) + CW * 0.7, y2: y(r2) + 6, kind: 'rf' })
+    }
+  }
+  const color = { ex: '#e8590c', mem: '#7048e8', rf: '#0c8599' }
+  const W = LW + N * CW + 10, H = TOP + ordered.length * RH + 8
+  return <div className="pl-chart-scroll">
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Multi-cycle pipeline diagram">
+      <defs>
+        <pattern id="tc-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff5f5" /><line x1="0" y1="0" x2="0" y2="6" stroke="#ffc9c9" strokeWidth="3" /></pattern>
+        {Object.entries(color).map(([k, v]) => <marker key={k} id={`tc-${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill={v} /></marker>)}
+      </defs>
+      <rect x={x(now)} y={4} width={CW} height={H - 6} rx={6} fill="#fff4e6" stroke="#f59f00" strokeWidth={1.5} />
+      {sim.cycles.map((c) => <text key={c.n} x={x(c.n) + CW / 2} y={20} textAnchor="middle" fontSize={13} fontWeight={c.n === now ? 700 : 400} fill={c.n === now ? '#d9480f' : '#6a665c'}>CC{c.n}</text>)}
+      {ordered.map((r, k) => <g key={r.key}>
+        {r.bubble
+          ? <text x={10} y={y(k) + RH / 2 + 5} fontSize={13} fill="#868e96" fontStyle="italic">bubble (stall)</text>
+          : <><circle cx={18} cy={y(k) + RH / 2} r={9} fill={instrColor(r.instr!)} /><text x={18} y={y(k) + RH / 2 + 4} textAnchor="middle" fontSize={10} fontWeight={700} fill="white">{r.instr!.id + 1}</text>
+            <text x={34} y={y(k) + RH / 2 + 5} fontSize={14} fontFamily="Consolas, monospace" fill="#1d1b16">{r.label}</text></>}
+        {[...(cells.get(r.key) ?? new Map<number, Cell>()).entries()].map(([n, cell]) => {
+          const future = n > now
+          const fill = r.bubble ? '#fff' : cell.repeat ? 'url(#tc-hatch)' : tint(instrColor(r.instr!), '26')
+          return <g key={n} opacity={future ? 0.35 : 1}>
+            <rect x={x(n) + 3} y={y(k) + 4} width={CW - 6} height={RH - 8} rx={6} fill={fill} stroke={r.bubble ? '#adb5bd' : cell.repeat ? '#e03131' : instrColor(r.instr!)} strokeDasharray={r.bubble ? '4 3' : undefined} strokeWidth={1.3} />
+            <text x={x(n) + CW / 2} y={y(k) + RH / 2 + 5} textAnchor="middle" fontSize={13} fontWeight={r.bubble ? 400 : 600} fill={r.bubble ? '#868e96' : cell.repeat ? '#c92a2a' : '#1d1b16'}>{r.bubble ? 'nop' : cell.stage}</text>
+          </g>
+        })}
+      </g>)}
+      {arrows.map((a, k) => {
+        const future = a.x1 > x(now) + CW
+        return <line key={k} x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2} stroke={color[a.kind]} strokeWidth={2.4} strokeDasharray={a.kind === 'rf' ? '5 4' : undefined} markerEnd={`url(#tc-${a.kind})`} opacity={future ? 0.25 : 1} />
+      })}
+      {sim.cycles.map((c) => <rect key={c.n} className="pl-chart-col" x={x(c.n)} y={0} width={CW} height={H} fill="transparent" onClick={() => onSeek(c.n - 1)}><title>{`Go to cycle ${c.n}`}</title></rect>)}
+    </svg>
+  </div>
 }
 
-function TimingChart({ sim, cursor, onSeek }: { sim: Simulation; cursor: number; onSeek: (index: number) => void }) {
-  const cycles = sim.frames.filter(f => f.state.half === 0)
-  const rows = [...sim.program.map(i => ({ key: `i${i.id}`, title: `I${i.id + 1} · ${i.text}` })), ...Array.from({ length: sim.stalls }, (_, i) => ({ key: `b${i + 1}`, title: `Bubble B${i + 1} · zero controls` }))]
-  const cells = cycles.map(({ state: s, signals: g }) => {
-    const map: Record<string, string> = {}
-    if (sim.program[s.pc / 4]) map[`i${s.pc / 4}`] = g.stall ? 'IF hold' : 'IF'
-    ;[s.ifid, s.idex, s.exmem, s.memwb].forEach((p, index) => {
-      if (p) map[p.ins ? `i${p.ins.id}` : `b${p.bubble}`] = ['ID', 'EX', 'MEM', 'WB'][index] + (index === 0 && g.stall ? ' hold' : '')
-    })
-    return map
-  })
-  return <div className="lab-table-scroll"><table className="lab-timing"><caption>Instruction timing from the same execution model. Select a cycle to inspect it; pale columns are ahead of the clock.</caption>
-    <thead><tr><th>Instruction</th>{cycles.map((f, index) => <th key={index} className={Math.floor(cursor / 2) === index ? 'current' : ''}><button onClick={() => onSeek(index * 2)} aria-label={`Inspect cycle ${f.state.cycle}`}>{f.state.cycle}</button></th>)}</tr></thead>
-    <tbody>{rows.map(row => <tr key={row.key}><th scope="row">{row.title}</th>{cells.map((cell, index) => <td key={index} className={`${index > Math.floor(cursor / 2) ? 'future' : ''} ${index === Math.floor(cursor / 2) ? 'current' : ''}`}><span className={`stage-${cell[row.key]?.split(' ')[0] ?? 'empty'} ${cell[row.key]?.includes('hold') ? 'held' : ''} ${row.key.startsWith('b') ? 'bubble-cell' : ''}`}>{cell[row.key] ?? '·'}</span></td>)}</tr>)}</tbody>
-  </table></div>
+// ---------- page ----------
+
+function LineView({ line }: { line: Line }) {
+  return <li className={line.tone ?? ''}>
+    <Md text={line.text} />
+    {line.checks && <div className="pl-checks">
+      {line.checks.map((c, i) => <span key={i} className={c.ok ? 'ok' : 'no'}>{c.ok ? '✔' : '✘'} {c.text}</span>)}
+      {line.result && <span className={`res ${line.result === 'false' || line.result === 'no stall' ? 'no' : 'ok'}`}>⇒ {line.result}</span>}
+    </div>}
+  </li>
 }
 
 export function PipelineLab() {
-  const [example, setExample] = useState(0)
-  const [code, setCode] = useState(EXAMPLES[0].code)
-  const [registers, setRegisters] = useState(EXAMPLES[0].registers)
-  const [memory, setMemory] = useState(EXAMPLES[0].memory)
-  const [input, setInput] = useState({ code, registers, memory })
-  const [cursor, setCursor] = useState(0)
+  const [example, setExample] = useState(9)
+  const [code, setCode] = useState(EXAMPLES[9].code)
+  const [registers, setRegisters] = useState(EXAMPLES[9].registers)
+  const [memory, setMemory] = useState(EXAMPLES[9].memory)
+  const [input, setInput] = useState({ code: EXAMPLES[9].code, registers: EXAMPLES[9].registers, memory: EXAMPLES[9].memory })
+  const [stepIndex, setStepIndex] = useState(0)
   const [error, setError] = useState('')
-  const [zoom, setZoom] = useState(false)
-  const sim = useMemo(() => { const initial = parseInitial(input.registers, input.memory); return simulate(parseProgram(input.code), initial.regs, initial.memory) }, [input])
-  const frame = sim.frames[cursor], s = frame.state, g = frame.signals
-  const last = sim.frames.length - 1, finished = cursor === last
+  const [spotlight, setSpotlight] = useState(true)
+  const [values, setValues] = useState(true)
+
+  const sim = useMemo(() => { const init = parseInitial(input.registers, input.memory); return simulate(parseProgram(input.code), init.regs, init.memory) }, [input])
+  const steps = useMemo(() => buildSteps(sim), [sim])
+  const step: Step = steps[Math.min(stepIndex, steps.length - 1)]
+  const c = sim.cycles[step.cycle]
+  const prev = step.cycle > 0 ? sim.cycles[step.cycle - 1] : null
+  const ex = explain(sim, step)
+  const last = steps.length - 1
   const dirty = input.code !== code || input.registers !== registers || input.memory !== memory
-  const deps = useMemo(() => dependencies(sim.program), [sim])
-  const choose = (index: number) => {
-    const e = EXAMPLES[index]
-    setExample(index); setCode(e.code); setRegisters(e.registers); setMemory(e.memory)
-    setInput({ code: e.code, registers: e.registers, memory: e.memory }); setCursor(0); setError('')
+
+  const go = (k: number) => setStepIndex(Math.max(0, Math.min(last, k)))
+  const seekCycle = (k: number) => go(steps.findIndex((s) => s.cycle === k))
+  const nextCycle = () => { const k = steps.findIndex((s) => s.cycle === step.cycle + 1); go(k < 0 ? last : k) }
+  const prevCycle = () => seekCycle(step.phase === 'edge' ? Math.max(0, step.cycle - 1) : step.cycle)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement
+      if (t.closest('textarea, select, input:not([type=checkbox])')) return
+      if (e.key === 'ArrowRight') { e.preventDefault(); if (e.shiftKey) nextCycle(); else go(stepIndex + 1) }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); if (e.shiftKey) prevCycle(); else go(stepIndex - 1) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const choose = (k: number) => {
+    const e = EXAMPLES[k]
+    setExample(k); setCode(e.code); setRegisters(e.registers); setMemory(e.memory)
+    setInput({ code: e.code, registers: e.registers, memory: e.memory }); setStepIndex(0); setError('')
   }
   const load = () => {
     try {
-      const initial = parseInitial(registers, memory)
-      simulate(parseProgram(code), initial.regs, initial.memory)
-      setInput({ code, registers, memory }); setCursor(0); setError(''); setExample(-1)
+      const init = parseInitial(registers, memory)
+      simulate(parseProgram(code), init.regs, init.memory)
+      setInput({ code, registers, memory }); setStepIndex(0); setError(''); setExample(-1)
     } catch (e) { setError((e as Error).message) }
   }
-  const nextState = sim.frames[(Math.floor(cursor / 2) + 1) * 2]?.state ?? sim.final
-  const packets = [s.ifid, s.idex, s.exmem, s.memwb]
-  const nextPackets = [nextState.ifid, nextState.idex, nextState.exmem, nextState.memwb]
-  const memoryAddresses = [...new Set([...Object.keys(s.memory), ...Object.keys(sim.final.memory), ...(s.exmem?.control.MemRead || s.exmem?.control.MemWrite ? [String(s.exmem.result >>> 0)] : [])])].map(Number).sort((a, b) => a - b)
+
+  const phasesHere = steps.filter((s) => s.cycle === step.cycle)
+  const memAddrs = [...new Set([...Object.keys(c.memory), ...Object.keys(sim.final.memory)].map(Number))].sort((a, b) => a - b)
+  const groups = [...new Set(EXAMPLES.map((e) => e.group))]
+  const regsShown = step.phase === 'edge' ? c.regs : c.regsMid
+  const wbReg = c.wb?.writes && step.phase !== 'edge' ? c.wb.rd : -1
+
+  const signal = (name: string, v: ReactNode, on: boolean, tone = '') => <div className={`pl-sig ${on ? 'on' : ''} ${tone}`}><span>{name}</span><b>{v}</b></div>
+  const e = c.at.idex && !c.at.idex.bubble ? c.ex : null
+
   return <main className="page pipeline-lab">
-    <header className="page-head"><p className="crumb">Task 1 · Five-stage pipeline · Forwarding enabled</p><h1>Inside the pipelined processor</h1><p className="lede">Give the clock yourself. Follow each instruction, inspect the pipeline registers, and see exactly why a value is forwarded or a cycle is stalled.</p></header>
-    <section className="lab-setup" aria-label="Program setup">
-      <div><label htmlFor="lab-example">Choose a forwarding case</label><select id="lab-example" value={example} onChange={e => choose(Number(e.target.value))}>{example === -1 && <option value={-1}>Custom program</option>}{EXAMPLES.map((e, i) => <option key={e.name} value={i}>{i + 1}. {e.name}</option>)}</select>
-        <p className="lab-goal">{example >= 0 ? EXAMPLES[example].goal : 'Trace your own straight-line program with the same forwarding and hazard-detection hardware.'}</p>
-        <label htmlFor="lab-code">MIPS program</label><textarea id="lab-code" rows={7} spellCheck={false} value={code} onChange={e => setCode(e.target.value)} />
-        <button className="lab-primary" onClick={load}>Load program & reset</button>{dirty && <span className="lab-dirty">Edits pending — load to apply</span>}
-        {error && <p className="err" role="alert">{error} The previous simulation is still loaded.</p>}
+    <header className="page-head">
+      <p className="crumb">Chapter 4 Part 2 · slides 52–75 · pipelined datapath with forwarding and hazard detection</p>
+      <h1>Pipeline lab: forwarding, hazard detection and stalls</h1>
+      <p className="lede">Pick a case, read what hazards it has, then clock the processor yourself. Each clock cycle is split into four steps so you can see exactly what changes: the clock edge, the register write in the first half, the read and hazard check in the second half, and the forwarding unit, ALU and memory.</p>
+    </header>
+
+    <section className="pl-setup">
+      <div className="pl-examples">
+        {groups.map((g) => <div key={g}>
+          <h3 className="preset-group">{g}</h3>
+          <div className="scen">{EXAMPLES.map((x, k) => x.group === g && <button key={x.name} className={k === example ? 'on' : ''} onClick={() => choose(k)}>{x.name}<small>{x.from}</small></button>)}</div>
+        </div>)}
       </div>
-      <div><h2>Before you clock</h2><p><b>{sim.program.length} instructions · {sim.frames.length / 2} cycles · {sim.stalls} load-use stall{sim.stalls === 1 ? '' : 's'}</b></p><p>The orange path uses an EX/MEM result; purple uses MEM/WB. A load result is available after MEM. A bubble advances through EX, MEM and WB with no writes.</p>
-        <details className="lab-dependencies"><summary>Program dependencies ({deps.length})</summary>{deps.length ? <ul>{deps.map((d, i) => <li key={i}>{d}</li>)}</ul> : <p>No read-after-write dependencies.</p>}</details>
-        <details><summary>Initial registers & memory</summary><p className="hint">Unspecified values are zero. Addresses are byte addresses; words must be aligned. Decimal and 0x hexadecimal values are accepted.</p><label htmlFor="lab-registers">Registers (name=value)</label><textarea id="lab-registers" rows={3} value={registers} spellCheck={false} onChange={e => setRegisters(e.target.value)} /><label htmlFor="lab-memory">Memory (address=value)</label><textarea id="lab-memory" rows={3} value={memory} spellCheck={false} onChange={e => setMemory(e.target.value)} /></details>
-        <details><summary>Hardware assumptions & source references</summary><p>Chapter 4 Part 2, slides 53–65 and 67–75; accompanying textbook, chapter 11. Register writes occur at the end of the first half; reads occur in the second half (slide 55). Pipeline registers latch together at the end of each cycle.</p><p>The extra MEM/WB → memory store-data path implements slide 66’s memory-copy case. The detector checks actual operands needed in EX; it does not stall for a store’s data alone or an immediate’s destination. ALUOp=00 selects addition, 10 decodes R-format; this model uses 11 for logical/comparison immediates.</p><p>Separate instruction/data memories; one-cycle memory; 32-bit integer values; arithmetic wraps without overflow traps. Fetch stops at the end of the program while the remaining stages drain. Supported: add/addu, sub/subu, and/or/xor/nor, slt/sltu, addi/addiu, andi/ori/xori, slti/sltiu, lw/sw, nop. Branches, jumps, labels, pseudo-instructions and exceptions are outside Task 1.</p></details>
+      <div className="pl-editor">
+        {example >= 0 ? <p className="pl-goal"><b>{EXAMPLES[example].name}.</b> {EXAMPLES[example].goal}</p> : <p className="pl-goal"><b>Your own program.</b> Same hardware: slide 75's forwarding unit and hazard detection unit.</p>}
+        <label htmlFor="pl-code">MIPS code <span className="muted">(add, sub, and, or, slt, nor, addi, lw, sw, nop)</span></label>
+        <textarea id="pl-code" rows={Math.max(4, code.split('\n').length + 1)} spellCheck={false} value={code} onChange={(x) => setCode(x.target.value)} />
+        <div className="pl-init">
+          <div><label htmlFor="pl-regs">Initial registers</label><textarea id="pl-regs" rows={2} spellCheck={false} value={registers} onChange={(x) => setRegisters(x.target.value)} /></div>
+          <div><label htmlFor="pl-mem">Initial memory (byte address = value)</label><textarea id="pl-mem" rows={2} spellCheck={false} value={memory} onChange={(x) => setMemory(x.target.value)} /></div>
+        </div>
+        <button className="lab-primary" onClick={load}>Load program &amp; reset</button>
+        {dirty && <span className="pl-dirty">You changed the program: load it to apply.</span>}
+        {error && <p className="err" role="alert">{error} The previous program is still loaded.</p>}
       </div>
     </section>
 
-    <section className="lab-clock" aria-label="Clock controls">
-      <div className="lab-clock-title" aria-live="polite"><b>Cycle {s.cycle} / {sim.frames.length / 2}</b><span>{s.half === 0 ? 'First half · WB write pending' : 'Second half · ID reads after WB'}{finished ? ' · Final cycle' : ''}</span></div>
-      <div className="lab-clock-buttons"><button onClick={() => setCursor(0)} disabled={cursor === 0}>Reset</button><button onClick={() => setCursor(c => Math.max(0, c - 1))} disabled={cursor === 0}>← Back half</button><button className="lab-primary" onClick={() => setCursor(c => Math.min(last, c + 1))} disabled={finished}>Next half-cycle →</button><button onClick={() => setCursor(c => Math.min(last, c + 2))} disabled={finished}>Next clock +1</button><button onClick={() => setCursor(last)} disabled={finished}>Finish</button></div>
-      <label className="lab-scrub">Inspect time<input aria-label="Simulation half-cycle" type="range" min={0} max={last} value={cursor} onChange={e => setCursor(Number(e.target.value))} /></label>
+    <Overview sim={sim} />
+
+    <section className="pl-clock" aria-label="Clock">
+      <div className="pl-clock-now" aria-live="polite">
+        <b>Clock cycle {c.n} <span className="muted">of {sim.cycles.length}</span></b>
+        <span className={`pl-clock-title ${ex.tone}`}>{ex.title}</span>
+      </div>
+      <ol className="pl-phases">
+        {PHASES.map((p) => {
+          const k = steps.findIndex((s) => s.cycle === step.cycle && s.phase === p.phase)
+          const here = phasesHere.some((s) => s.phase === p.phase)
+          return <li key={p.phase} className={`${step.phase === p.phase ? 'on' : ''} ${here ? '' : 'skip'}`}>
+            <button disabled={!here} onClick={() => go(k)}><b>{p.short}</b><small>{p.long}</small></button>
+          </li>
+        })}
+      </ol>
+      <div className="pl-buttons">
+        <button onClick={() => go(0)} disabled={stepIndex === 0} title="Back to cycle 1">⏮ Reset</button>
+        <button onClick={prevCycle} disabled={stepIndex === 0} title="Shift + ←">⏪ Cycle</button>
+        <button onClick={() => go(stepIndex - 1)} disabled={stepIndex === 0} title="←">◀ Back</button>
+        <button className="lab-primary" onClick={() => go(stepIndex + 1)} disabled={stepIndex === last} title="→">Next ▶</button>
+        <button onClick={nextCycle} disabled={stepIndex === last} title="Shift + →">Cycle ⏩</button>
+        <button onClick={() => go(last)} disabled={stepIndex === last}>End ⏭</button>
+      </div>
+      <input className="pl-scrub" aria-label="Step" type="range" min={0} max={last} value={stepIndex} onChange={(x) => go(Number(x.target.value))} />
     </section>
-    <div className="lab-section-head"><h2>Live datapath</h2><button onClick={() => setZoom(z => !z)} aria-pressed={zoom}>{zoom ? 'Fit diagram' : 'Enlarge diagram'}</button></div>
-    <div className={`lab-diagram ${zoom ? 'zoomed' : ''}`}><PipelineDatapath frame={frame} program={sim.program} /></div>
-    <div className="lab-signals" aria-label="Live control signals">{[['PCWrite', +!g.stall], ['IF/IDWrite', +!g.stall], ['Zero controls', +g.stall], ['ForwardA', g.a.select], ['ForwardB', g.b.select], ['Store bypass', +g.storeForward]].map(([key, val]) => <div key={key}><span>{key}</span><b>{val}</b></div>)}</div>
-    <section className={`lab-explanation ${g.stall ? 'stall' : ''}`}><h2>{g.stall ? 'Hazard detected — freeze the front, drain the back' : s.idex?.bubble ? 'The bubble gives the load time to finish' : finished ? 'Final writeback — pipeline trace complete' : 'What happens in this half-cycle'}</h2><ol>{explain(frame, sim).map((line, i) => <li key={i}>{line}</li>)}</ol></section>
-    <section><div className="lab-section-head"><h2>Pipeline register contents</h2><span>Current latches → next clock edge</span></div><div className="lab-latches">{packets.map((p, i) => <article className={`lab-latch ${p?.bubble ? 'bubble' : ''}`} key={i}><h3>{['IF/ID', 'ID/EX', 'EX/MEM', 'MEM/WB'][i]}</h3><p className="lab-packet">{name(p)}</p><dl>{packetFields(p, i).map(([key, val]) => <div key={key}><dt>{key}</dt><dd>{val}</dd></div>)}</dl><p className="lab-next"><b>{g.stall && i === 0 ? 'HOLD' : 'Next edge'}:</b> {name(nextPackets[i])}</p><details><summary>Preview next values</summary><dl>{packetFields(nextPackets[i], i).map(([key, val]) => <div key={key}><dt>{key}</dt><dd>{val}</dd></div>)}</dl></details></article>)}</div></section>
-    <section className="lab-timeline"><h2>Instruction-by-instruction timing</h2><TimingChart sim={sim} cursor={cursor} onSeek={setCursor} /></section>
-    <section className="lab-state"><div><h2>Architectural registers</h2><p className="hint">Signed decimal · hover for hexadecimal. Green marks this cycle’s WB destination; the value changes between halves.</p><div className="lab-register-grid">{NAMES.map((n, r) => <div key={n} className={g.wb?.dest === r ? 'written' : ''} title={hex(s.regs[r])}><span>${n} <small>({r})</small></span><b>{s.regs[r]}</b></div>)}</div></div><div><h2>Data memory</h2><p className="hint">Stores commit at the cycle edge. Uninitialized words read as 0.</p><table className="lab-memory"><thead><tr><th>Byte address</th><th>Current value</th></tr></thead><tbody>{memoryAddresses.map(address => <tr key={address} className={s.exmem && (s.exmem.control.MemRead || s.exmem.control.MemWrite) && s.exmem.result >>> 0 === address ? 'written' : ''}><td>{hex(address)}</td><td title={hex(s.memory[address] ?? 0)}>{s.memory[address] ?? 0}</td></tr>)}</tbody></table>{!memoryAddresses.length && <p>No memory words initialized or accessed.</p>}</div></section>
+
+    <div className="pl-stage">
+      <div className="pl-diagram"><PipelineDatapath cycle={c} phase={step.phase} spotlight={spotlight} values={values} /></div>
+      <aside className={`pl-explain ${ex.tone}`}>
+        <h2>{ex.title}</h2>
+        <ol>{ex.lines.map((l, k) => <LineView key={k} line={l} />)}</ol>
+        <div className="pl-sigs">
+          {signal('PCWrite', c.hazard.checked || c.at.ifid ? c.pcWrite : 1, c.hazard.stall, 'hazard')}
+          {signal('IF/IDWrite', c.ifidWrite, c.hazard.stall, 'hazard')}
+          {signal('Stall', +c.hazard.stall, c.hazard.stall, 'hazard')}
+          {signal('ForwardA', e ? e.fa.sel : '—', !!e && e.fa.sel !== '00', e?.fa.sel === '10' ? 'ex' : 'mem')}
+          {signal('ForwardB', e ? e.fb.sel : '—', !!e && e.fb.sel !== '00' && !e.fb.unused, e?.fb.sel === '10' ? 'ex' : 'mem')}
+          {signal('RegWrite (WB)', c.wb ? c.wb.regWrite : '—', !!c.wb?.writes, 'rf')}
+        </div>
+      </aside>
+    </div>
+
+    <div className="pl-below">
+    <div className="pl-toggles">
+      <label><input type="checkbox" checked={spotlight} onChange={(x) => setSpotlight(x.target.checked)} /> Spotlight this step</label>
+      <label><input type="checkbox" checked={values} onChange={(x) => setValues(x.target.checked)} /> Show values</label>
+      <span className="muted">Keys: → next step · ← back · Shift + arrow = whole cycle</span>
+    </div>
+    <div className="pl-legend">
+      <span><i style={{ background: '#e8590c' }} />EX/MEM → ALU (Forward = 10)</span>
+      <span><i style={{ background: '#7048e8' }} />MEM/WB → ALU (Forward = 01)</span>
+      <span><i style={{ background: '#e03131' }} />hazard detection / stall</span>
+      <span><i style={{ background: '#0c8599' }} />register file: write in 1st half, read in 2nd half</span>
+      <span><i style={{ background: '#111' }} />data in use</span>
+      <span><i style={{ background: '#24519e' }} />control in use</span>
+      <span><i style={{ background: '#cdcdcd' }} />not used this cycle</span>
+    </div>
+    </div>
+
+    <section>
+      <div className="pl-head"><h2>Pipeline register contents</h2><span className="muted">“Next edge” is what each register will latch at the end of this cycle. Highlighted rows changed at the last edge.</span></div>
+      <div className="pl-latches">
+        <Latch title="PC" k="pc" c={c} prev={prev} edge={step.phase === 'edge'} />
+        <Latch title="IF/ID" k="ifid" c={c} prev={prev} edge={step.phase === 'edge'} />
+        <Latch title="ID/EX" k="idex" c={c} prev={prev} edge={step.phase === 'edge'} />
+        <Latch title="EX/MEM" k="exmem" c={c} prev={prev} edge={step.phase === 'edge'} />
+        <Latch title="MEM/WB" k="memwb" c={c} prev={prev} edge={step.phase === 'edge'} />
+      </div>
+    </section>
+
+    <section>
+      <div className="pl-head"><h2>Instruction by instruction</h2><span className="muted">Click a cycle to jump there. Red hatched cells repeat because of a stall (slide 74). Arrows show forwarding (orange 10, purple 01) and same-cycle register-file reads (teal dashed).</span></div>
+      <TimingChart sim={sim} cycle={step.cycle} onSeek={seekCycle} />
+    </section>
+
+    <section className="pl-state">
+      <div>
+        <div className="pl-head"><h2>Register file</h2><span className="muted">{step.phase === 'edge' ? 'At the start of the cycle.' : 'After the first-half write.'} Hover for hex.</span></div>
+        <div className="pl-regs">{NAMES.map((n, r) => <div key={n} className={r === wbReg ? 'written' : ''} title={hex(regsShown[r])}>
+          <span>{regName(r)} <small>{regName(r) === `$${n}` ? r : n}</small></span><b>{r === wbReg && c.wb ? <><s>{c.wb.old}</s> {regsShown[r]}</> : regsShown[r]}</b>
+        </div>)}</div>
+      </div>
+      <div>
+        <div className="pl-head"><h2>Data memory</h2><span className="muted">A store is written at the end of its MEM cycle.</span></div>
+        {memAddrs.length ? <table className="pl-memory"><thead><tr><th>Address</th><th>Value</th></tr></thead>
+          <tbody>{memAddrs.map((a) => <tr key={a} className={c.mem?.address === a ? (c.mem.write ? 'writing' : 'reading') : ''}><td>{a}</td><td>{c.memory[a] ?? 0}{c.mem?.address === a && c.mem.write ? ` → ${c.at.exmem!.writeData} at edge` : ''}</td></tr>)}</tbody>
+        </table> : <p className="muted">No memory words used.</p>}
+      </div>
+    </section>
+
+    <section className="eqs pl-rules">
+      <div>
+        <h3>Forwarding unit (EX) · slides 61 and 64</h3>
+        <pre>{`EX hazard:
+if (EX/MEM.RegWrite and (EX/MEM.RegisterRd ≠ 0)
+    and (EX/MEM.RegisterRd = ID/EX.RegisterRs))  ForwardA = 10
+if (EX/MEM.RegWrite and (EX/MEM.RegisterRd ≠ 0)
+    and (EX/MEM.RegisterRd = ID/EX.RegisterRt))  ForwardB = 10
+
+MEM hazard (revised for the double data hazard):
+if (MEM/WB.RegWrite and (MEM/WB.RegisterRd ≠ 0)
+    and not (EX/MEM.RegWrite and (EX/MEM.RegisterRd ≠ 0)
+             and (EX/MEM.RegisterRd = ID/EX.RegisterRs))
+    and (MEM/WB.RegisterRd = ID/EX.RegisterRs))  ForwardA = 01
+(same for Rt → ForwardB = 01)`}</pre>
+      </div>
+      <div>
+        <h3>Hazard detection unit (ID) · slide 69</h3>
+        <pre>{`if (ID/EX.MemRead and
+    ((ID/EX.RegisterRt = IF/ID.RegisterRs) or
+     (ID/EX.RegisterRt = IF/ID.RegisterRt)))
+  stall the pipeline`}</pre>
+        <h3>How it stalls · slide 72</h3>
+        <ul className="plain-steps">
+          <li>Force the control values in ID/EX to 0: EX, MEM and WB do nothing (the bubble).</li>
+          <li>PCWrite = 0 and IF/IDWrite = 0: the using instruction is decoded again, the next one is fetched again.</li>
+          <li>One cycle later the loaded value is in MEM/WB and is forwarded with Forward = 01.</li>
+        </ul>
+      </div>
+    </section>
   </main>
 }

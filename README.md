@@ -22,40 +22,36 @@ npm run preview
 
 ## Task 1: Pipeline lab
 
-Select a case, read its explanation, then give the processor a clock:
+The lab draws the pipelined datapath from Chapter 4 Part 2: slide 52's datapath and control, slide 65's forwarding unit and slide 75's hazard detection unit. It uses the same shapes as the single-cycle lessons. Branch hardware is left out until the control-hazard lesson.
 
-- **Next half-cycle** separates WB's first-half register write from ID's second-half read. The following half-cycle advances all pipeline latches at the cycle edge.
-- **Next clock +1** advances one full cycle, preserving the selected half where possible.
-- **Back half**, **Reset**, **Finish**, the time slider, and clickable timing-chart columns let you inspect/replay the trace. Rewinding restores registers and memory as well as instructions.
-- The large datapath highlights EX/MEM and MEM/WB forwarding, the ALU-input multiplexers, hazard detection, freeze controls, and the store-data bypass.
-- The four pipeline-register panels show latched data, register numbers, extended immediates, destination registers, and EX/MEM/WB controls. Each panel previews its values at the next clock edge.
-- The instruction timing chart and bubble rows come from the same execution snapshots as the datapath. Future columns are pale. Architectural registers and data memory appear below.
-- Edit the program or initial register/memory assignments, then press **Load program & reset**. Invalid programs retain the previously loaded simulation and show a diagnostic.
+1. Pick one of the 18 cases. Each is tied to a slide: the slide 53 chain, EX/MEM and MEM/WB hazards, the double data hazard, first-half write / second-half read, RegWrite and $zero checks, ALU → store, load-use stalls, lw → sw, a stall without a real dependence, two loads in a row, and code scheduling before and after. You can also type your own program.
+2. Read **The program** and **Hazards in this program**. They list each dependence, how the hardware resolves it (EX/MEM, MEM/WB, register file, stall) and the cycle count 5 + (n − 1) + stalls.
+3. Clock the processor with **Next ▶** or the → key. Each cycle has four steps, and empty steps are skipped:
+   - **↑ Clock edge**: the pipeline registers and PC latch. Changed fields are highlighted, and a held PC or IF/ID is marked.
+   - **1st half**: WB writes the register file.
+   - **2nd half**: ID reads the registers, the hazard detection unit checks slide 69's condition, and IF fetches.
+   - **EX + MEM**: the forwarding unit evaluates slides 61/64 with real register numbers, then the ALU and data memory run.
+   **Spotlight** dims everything a step does not use. **Show values** puts the values on the wires. Shift + arrow moves a whole cycle, and clicking the timing chart jumps to any cycle.
 
-The 15 examples cover both forwarding inputs, each forwarding source, simultaneous forwarding from different sources, competing writers, load-use stalls, a load with an instruction gap, same-cycle WB/ID access, store data versus base dependencies, and exclusions for $zero and destination-only operands.
+Colours: orange = forwarded from EX/MEM (10), purple = from MEM/WB (01), red = hazard detection / stall, teal = register-file write and read, grey = not used this cycle.
 
-## Model and scope
+## Hardware model (exactly the slides)
 
-The implementation follows the supplied **Chapter 4 (Part 2)** slides 53-65 and 67-75 and chapter 11 of **MIPS_Pipelining_FloatingPoint_Textbook**. Slide 55 defines first-half writes and second-half reads. The other single-cycle lessons remain available.
-
-This version includes the additional **MEM/WB to data-memory write input** path discussed by slide 66 and textbook section 11.5.1. Consequently, lw immediately followed by sw of the loaded value needs no stall when only the store data depends on the load. A dependent store base still stalls. This is an explicit refinement of the basic slide-69 detector, which would conservatively stall either case.
-
-- Five in-order stages: IF, ID, EX, MEM, WB; separate instruction and data memories; single-cycle memory.
-- EX/MEM wins over an older MEM/WB writer. Load addresses are never treated as loaded values. A pending newer load also blocks forwarding an older matching writer.
-- A load-use stall holds PC and IF/ID, injects zero controls into ID/EX, and lets older stages advance. Inserted bubbles remain visible until they drain.
-- Stores commit at the cycle edge. Register writes commit between the first and second halves. The clock starts at cycle 1 with an empty pipeline and PC=0; fetch stops at the program end while occupied stages drain.
-- All unspecified registers and memory words start at zero. $zero cannot change. Register aliases resolve to the same numeric register. Memory uses aligned byte addresses and 32-bit words.
-- Values are signed 32-bit integers, with unsigned hexadecimal available. Arithmetic wraps; overflow exceptions are not modeled. Unaligned memory accesses are rejected with the cycle/instruction/address identified.
-- ALUOp=00 selects addition; 10 decodes R-format. The model extends ALUOp=11 to logical/comparison immediate instructions. The decoded ALU operation is displayed separately.
-- Supported: add, addu, sub, subu, and, or, xor, nor, slt, sltu, addi, addiu, andi, ori, xori, slti, sltiu, lw, sw, nop. Signed immediates are -32768 to 32767; logical immediates are 0 to 65535. Decimal/hexadecimal inputs and # comments are accepted.
-- Up to 64 instructions per trace. Branches, jumps, labels, pseudo-instructions, exceptions, no-forwarding variants, and branch-in-ID variants are outside Task 1. Unsupported instructions are rejected explicitly.
+- Forwarding unit: slide 61 EX hazard, slide 64 revised MEM hazard (EX/MEM wins a double data hazard). It compares register numbers only, so ForwardB can fire for an I-format rt that is really a destination. ALUSrc then ignores it, and the lab says so.
+- Hazard detection unit: slide 69, `ID/EX.MemRead and (ID/EX.RegisterRt = IF/ID.RegisterRs or ID/EX.RegisterRt = IF/ID.RegisterRt)`. This means `lw` followed by `sw` of the loaded register stalls one cycle. There is no MEM-to-MEM forwarding path. It also stalls conservatively when `rt` is only a destination (e.g. `lw $2` then `addi $2, $5, 7`).
+- Stall (slides 71–72): PCWrite = 0, IF/IDWrite = 0, and the control mux puts 0 into every ID/EX control bit. The bubble's data fields are still latched, but nothing uses them.
+- Register file: written in the first half and read in the second half (slide 55).
+- Control from slide 51. ALU control from funct[3:0] when ALUOp = 10, add otherwise. `nop` is `sll $0,$0,0`: an R-format word that writes $zero, which is ignored. For sw, RegDst and MemtoReg are shown as X.
+- Supported: add, sub, and, or, slt, nor, addi, lw, sw, nop (the operations the slide ALU control handles). Branches and jumps are rejected until the next lesson. Values are 32-bit signed and wrap. Memory addresses must be multiples of 4. At most 24 instructions.
+- Registers are shown the way the program writes them: `$2` style as on the slides, or `$t0` style.
 
 ## Code layout
 
-- src/pipeline/engine.ts: pure parser, decoder, half-cycle execution model, forwarding selections, and dependency analysis.
-- src/pipeline/examples.ts: editable teaching examples and their initial state.
-- src/pipeline/PipelineDatapath.tsx: full SVG datapath driven by execution snapshots.
-- src/lessons/PipelineLab.tsx: clock controls, explanations, state inspectors, and timing chart.
-- tests/pipeline.test.mjs: timing/forwarding/stall regressions and 100 deterministic randomized programs checked against an independent sequential interpreter.
+- src/pipeline/engine.ts: parser and encoder, control, cycle-by-cycle simulation (latches, forwarding checks, hazard checks), dependence summary.
+- src/pipeline/explain.ts: clock sub-steps and the explanation for each step.
+- src/pipeline/PipelineDatapath.tsx: the slide-style SVG datapath, driven by one simulated cycle and step.
+- src/pipeline/examples.ts: the teaching cases with their slide references.
+- src/lessons/PipelineLab.tsx: the lab page (overview, clock, explanation, pipeline register contents, timing chart, register file, memory).
+- tests/pipeline.test.mjs: slide-by-slide regression tests and 150 random programs checked against a one-instruction-at-a-time interpreter.
 
-The existing repository has Fast Refresh lint warnings in its older diagram modules and a production chunk-size warning. They do not prevent running or building the app.
+The older diagram modules have Fast Refresh lint warnings, and the production build reports a chunk-size warning. Neither affects running or building the app.

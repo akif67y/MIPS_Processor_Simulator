@@ -10,8 +10,13 @@ import type { ReactNode } from 'react'
  *  computed – computed this cycle but not chosen by the mux
  *  faded    – not part of the current topic
  *  added    – hardware newly added for an extension (e.g. bne)
- *  hidden   – not drawn at all */
-export type Look = 'normal' | 'chosen' | 'computed' | 'faded' | 'added' | 'hidden'
+ *  hidden   – not drawn at all
+ *  Pipeline lab only:
+ *  exmem    – value forwarded from the EX/MEM pipeline register (Forward = 10)
+ *  memwb    – value forwarded from the MEM/WB pipeline register (Forward = 01)
+ *  hazard   – hazard detection unit / stall signals
+ *  rf       – register-file write (first half) and read (second half) */
+export type Look = 'normal' | 'chosen' | 'computed' | 'faded' | 'added' | 'hidden' | 'exmem' | 'memwb' | 'hazard' | 'rf'
 
 export const COLORS = {
   data: '#111111',
@@ -21,6 +26,15 @@ export const COLORS = {
   chosen: '#e8590c',
   computed: '#8f7cc8',
   added: '#2f9e44',
+  exmem: '#e8590c',
+  memwb: '#7048e8',
+  hazard: '#e03131',
+  rf: '#0c8599',
+}
+
+/** Looks drawn with a heavier stroke because they are the point of the picture. */
+export function hot(look: Look) {
+  return look === 'chosen' || look === 'exmem' || look === 'memwb' || look === 'hazard' || look === 'rf'
 }
 
 export type Kind = 'data' | 'ctrl'
@@ -30,12 +44,14 @@ export function strokeOf(look: Look, kind: Kind = 'data') {
   if (look === 'computed') return COLORS.computed
   if (look === 'faded') return COLORS.faded
   if (look === 'added') return COLORS.added
+  if (look === 'exmem' || look === 'memwb' || look === 'hazard' || look === 'rf') return COLORS[look]
   return kind === 'ctrl' ? COLORS.ctrl : COLORS.data
 }
 
 export function textOf(look: Look, kind: Kind = 'data') {
   if (look === 'faded') return COLORS.fadedText
   if (look === 'added') return COLORS.added
+  if (look === 'exmem' || look === 'memwb' || look === 'hazard' || look === 'rf') return COLORS[look]
   return kind === 'ctrl' ? COLORS.ctrl : COLORS.data
 }
 
@@ -56,15 +72,15 @@ export function Wire(props: {
   if (look === 'hidden') return null
   const c = strokeOf(look, kind)
   const base = thick ? 6 : 2.6
-  const w = look === 'chosen' ? base + 3 : look === 'computed' ? base + 1.2 : base
+  const w = hot(look) ? base + 3 : look === 'computed' ? base + 1.2 : base
   const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' ')
   let head: ReactNode = null
   if (arrow && pts.length > 1) {
     const [x2, y2] = pts[pts.length - 1]
     const [x1, y1] = pts[pts.length - 2]
     const a = Math.atan2(y2 - y1, x2 - x1)
-    const L = 16 + (look === 'chosen' ? 4 : 0)
-    const W = 7 + (look === 'chosen' ? 2 : 0)
+    const L = 16 + (hot(look) ? 4 : 0)
+    const W = 7 + (hot(look) ? 2 : 0)
     const p1: Pt = [x2 - L * Math.cos(a) + W * Math.sin(a), y2 - L * Math.sin(a) - W * Math.cos(a)]
     const p2: Pt = [x2 - L * Math.cos(a) - W * Math.sin(a), y2 - L * Math.sin(a) + W * Math.cos(a)]
     head = <polygon points={`${x2},${y2} ${p1[0]},${p1[1]} ${p2[0]},${p2[1]}`} fill={c} />
@@ -74,7 +90,7 @@ export function Wire(props: {
       <path d={d} fill="none" stroke={c} strokeWidth={w} strokeLinejoin="miter" />
       {head}
       {dots.map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={look === 'chosen' ? 8 : 6.5} fill={c} />
+        <circle key={i} cx={x} cy={y} r={hot(look) ? 8 : 6.5} fill={c} />
       ))}
     </g>
   )
@@ -123,7 +139,7 @@ export function Mux(props: {
   const c = strokeOf(look)
   const t = textOf(look)
   const cx = x + w / 2
-  const sw = look === 'chosen' ? 4.5 : 2.6
+  const sw = hot(look) ? 4.5 : 2.6
   return (
     <g fontFamily={FONT}>
       <rect x={x} y={y} width={w} height={h} rx={w / 2} ry={w / 2} fill="white" stroke={c} strokeWidth={sw} />
@@ -147,7 +163,7 @@ export function MuxN(props: { x: number; y: number; w: number; h: number; inputs
   const cy = y + h / 2
   return (
     <g fontFamily={FONT}>
-      <rect x={x} y={y} width={w} height={h} rx={w / 2} ry={w / 2} fill="white" stroke={c} strokeWidth={look === 'chosen' ? 4.5 : 2.6} />
+      <rect x={x} y={y} width={w} height={h} rx={w / 2} ry={w / 2} fill="white" stroke={c} strokeWidth={hot(look) ? 4.5 : 2.6} />
       {inputs.map((i) => (
         <text key={i.t} x={x + 5} y={i.y + 8} fontSize={19} fill={t}>{i.t}</text>
       ))}
@@ -188,7 +204,7 @@ export function Adder(props: {
     .join(' ')
   return (
     <g fontFamily={FONT}>
-      <polygon points={pts} fill="white" stroke={c} strokeWidth={look === 'chosen' ? 4.5 : 2.6} strokeLinejoin="miter" />
+      <polygon points={pts} fill="white" stroke={c} strokeWidth={hot(look) ? 4.5 : 2.6} strokeLinejoin="miter" />
       {children}
     </g>
   )
@@ -213,7 +229,7 @@ export function Oval(props: {
   const y0 = cy - ((lines.length - 1) * lh) / 2 + size * 0.35
   return (
     <g fontFamily={FONT}>
-      <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="white" stroke={c} strokeWidth={look === 'chosen' ? 4.5 : 2.6} />
+      <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="white" stroke={c} strokeWidth={hot(look) ? 4.5 : 2.6} />
       {lines.map((l, i) => (
         <text key={i} x={cx} y={y0 + i * lh} fontSize={size} fontWeight={700} textAnchor="middle" fill={t}>
           {l}
@@ -229,7 +245,7 @@ export function Box(props: { x: number; y: number; w: number; h: number; look: L
   if (look === 'hidden') return null
   return (
     <g fontFamily={FONT}>
-      <rect x={x} y={y} width={w} height={h} fill="white" stroke={strokeOf(look)} strokeWidth={look === 'chosen' ? 4.5 : 2.6} />
+      <rect x={x} y={y} width={w} height={h} fill="white" stroke={strokeOf(look)} strokeWidth={hot(look) ? 4.5 : 2.6} />
       {children}
     </g>
   )
@@ -242,7 +258,7 @@ export function AndGate(props: { x: number; y: number; w: number; h: number; loo
   const r = h / 2
   const flat = w - r
   const d = `M${x},${y} H${x + flat} A${r},${r} 0 0 1 ${x + flat},${y + h} H${x} Z`
-  return <path d={d} fill="white" stroke={strokeOf(look, 'ctrl')} strokeWidth={look === 'chosen' ? 4.5 : 2.6} />
+  return <path d={d} fill="white" stroke={strokeOf(look, 'ctrl')} strokeWidth={hot(look) ? 4.5 : 2.6} />
 }
 
 /** OR gate: curved back, pointed front. Inputs land about 5 px inside the left edge. */
@@ -250,7 +266,7 @@ export function OrGate(props: { x: number; y: number; w: number; h: number; look
   const { x, y, w, h, look } = props
   if (look === 'hidden') return null
   const d = `M${x},${y} Q${x + w * 0.62},${y} ${x + w},${y + h / 2} Q${x + w * 0.62},${y + h} ${x},${y + h} Q${x + w * 0.3},${y + h / 2} ${x},${y} Z`
-  return <path d={d} fill="white" stroke={strokeOf(look, 'ctrl')} strokeWidth={look === 'chosen' ? 4.5 : 2.6} />
+  return <path d={d} fill="white" stroke={strokeOf(look, 'ctrl')} strokeWidth={hot(look) ? 4.5 : 2.6} />
 }
 
 /** NOT gate pointing right: triangle plus bubble. (x, y) is the input point. */
@@ -258,7 +274,7 @@ export function NotGate(props: { x: number; y: number; look: Look; size?: number
   const { x, y, look, size = 24 } = props
   if (look === 'hidden') return null
   const c = strokeOf(look, 'ctrl')
-  const sw = look === 'chosen' ? 4 : 2.6
+  const sw = hot(look) ? 4 : 2.6
   const half = size * 0.6
   return (
     <g>
