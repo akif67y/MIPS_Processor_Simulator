@@ -5,6 +5,7 @@ import { AddBne } from './lessons/AddBne'
 import { ExtensionPage, type ExtensionSpec } from './lessons/ExtensionPage'
 import { JAL, JR, LUI, ORI, SLT } from './lessons/extensions'
 import { Forwarding } from './lessons/Forwarding'
+import { PipelineLab } from './lessons/PipelineLab'
 
 const ext = (spec: ExtensionSpec) => () => <ExtensionPage spec={spec} />
 
@@ -19,6 +20,7 @@ const PAGES: { path: string; title: string; Page: ComponentType }[] = [
   { path: 'add-ori', title: '+ ori', Page: ext(ORI) },
   { path: 'slt', title: 'slt', Page: ext(SLT) },
   { path: 'forwarding', title: 'Forwarding', Page: Forwarding },
+  { path: 'pipeline-lab', title: 'Pipeline lab', Page: PipelineLab },
 ]
 
 function currentPath() {

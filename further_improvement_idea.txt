@@ -1,0 +1,33 @@
+what it has:
+
+currently the project has a very good simulation of a single cycle pc 
+also very good hazard detection and forwarding multicycle diagram shown 
+(customizable: you can input code)
+
+
+what my plan is to improve:
+
+I have many ideas but currently we will focus on one single thing:
+version 1.the pipelined PC has many extra thing : forwarding unit and hazard detection unit, pipeline register
+version 2.also a variation without forwarding
+version 3.a variation where branch is resolved in ID(instruction decode) step
+
+Task 1:
+at first, we will work with version 1. I am interested in pipelining with forwarding. lw and then add or anything with 
+1 distance requires we stall and this stall has some steps as well. in our source material it was not clearly simulated well
+your job will be to create a step by step simulation of every forwarding related cases with the big PC diagram(not just IF-ID-EX-MEM-WB like it is in the slides)
+I want to show every step of forwarding related issues, stalls, hazard detection unit steps in the big diagram with clear labelling marking so that the visuals are
+very easy to track. Our target is very detailed simulatioin showing everything. even pipeline register values. 
+user will manually give clock and stages will transform. simulate that register write in the first half and read in the second half part as well. in a word we are aiming to cover
+every small detailed and build a complete visualization.
+so show every case of forwarding like this.
+Now build this simulation of forwarding, hazard detection unit, stalls.
+along with this big pc, a line by line IF-ID-.. like simulation will also be shown. current version already support this. you can reuse it.
+Later Tasks: 
+Then we will handle the case of control hazards like this in details. then we will handle stalls there as well
+Then we will try the other variation[with forwarding, without forwarding etc]. it will be customizable, users will be able to try different variation by clicking add to add units 
+Then after everything is done we will support putting any assembly MIPS code and then their simulation in our big PC diagram handling everthing. 
+[in every step there should be clear explanation of your job to explain user what is happening
+also first a overall explanation of the code, hazard present etc.]
+
+
