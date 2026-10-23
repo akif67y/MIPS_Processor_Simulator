@@ -566,7 +566,7 @@ function DataStudio() {
             </ol>
             <div className="st-stage-tools">
               <div className="st-seg" role="radiogroup" aria-label="Camera">
-                <button role="radio" aria-checked={camera === 'follow'} onClick={() => setCamera('follow')} disabled={whole} title={whole ? 'The whole cycle always shows the whole datapath' : 'Zoom to the part of the datapath the step is about'}>Follow the step</button>
+                <button role="radio" aria-checked={camera === 'follow' && !whole} onClick={() => { setCamera('follow'); switchMode('focus') }} title={whole ? 'Read this cycle in steps, with the camera zooming to each step' : 'Zoom to the part of the datapath the step is about'}>Follow the step</button>
                 <button role="radio" aria-checked={camera === 'whole' || whole} onClick={() => setCamera('whole')}>Whole datapath</button>
               </div>
               <button className="st-pill" aria-pressed={values} onClick={() => setValues(!values)} title="Show the values on the wires">Values</button>
