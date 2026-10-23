@@ -4,17 +4,18 @@
    var(--name) strings from src/datapath/shapes.tsx and src/pipeline/colors.ts. */
 :root {
   /* ---------- interface: surfaces and text ---------- */
-  --bg: #f6f5f1;
+  --bg: #F2F1ED;
+  --stage: #E8E6E0;              /* ground behind the datapath area (studio lab pages) */
   --card: #ffffff;
   --card-glass: #fffffff2;       /* the sticky clock toolbar, over the diagram */
-  --field: #faf9f6;
-  --code-bg: #f0eee7;
-  --ink: #1d1b16;
+  --field: #F8F7F4;
+  --code-bg: #ECEAE4;
+  --ink: #1B1B1B;
   --ink-soft: #3b3830;           /* lede and answer text */
   --ink-strong: #212529;
   --ink-faint: #8a877f;          /* forwarding page: register-file arrows, bubble labels */
-  --muted: #6a665c;
-  --line: #e2dfd6;
+  --muted: #5E5C56;
+  --line: #E2E0DA;
   --gray-800: #343a40;
   --gray-700: #495057;
   --gray-500: #868e96;
@@ -24,18 +25,19 @@
   --gray-200: #e9ecef;
   --gray-100: #f1f3f5;
   --gray-50: #f8f9fa;
-  --control-border: #c9d1d8;
+  --control-border: #CFCCC4;
   --toolbar-border: #cdd6df;
   --toggle-border: #b8c2cc;      /* dashed "Show more" toggles */
 
   /* ---------- interface: actions and state ---------- */
-  --primary: #245b8a;
-  --primary-hover: #17456d;
-  --primary-soft: #edf4fb;
-  --accent: #e8590c;
-  --accent-soft: #fff1e8;
+  --primary: #1B1B1B;
+  --primary-hover: #000000;
+  --primary-soft: #ECEAE4;
+  --accent: #F4B53F;               /* fills only, never text */
+  --accent-soft: #FCF0D2;
+  --accent-text: #C2410C;          /* accent as text or a thin border, on pages not yet redesigned */
   --accent-line: #f2a679;        /* hover border of a single-cycle step */
-  --focus: #f59f00;
+  --focus: #1B1B1B;
   --now-fill: #fff4e6;           /* current cycle column in the timing chart */
   --now-text: #d9480f;
   --highlight: #fff3bf;
@@ -61,6 +63,7 @@
   --hazard-hatch: #ffc9c9;       /* stripes of a repeated (stalled) timing-chart cell */
   --flush-hatch: #fcc2d7;
   --rf-written-bg: #e3fafc;
+  --bubble-hatch: #e4e7ea;        /* second stripe of a bubble in the studio timing chart */
 
   /* ---------- single-cycle lessons ---------- */
   --path-chosen: #e8590c;
@@ -69,14 +72,14 @@
   --hw-added-bg: #ebfbee;
 
   /* ---------- instruction colours (I1, I2, … wrap after 8) ---------- */
-  --instr-1: #1971c2;
-  --instr-2: #2b8a3e;
-  --instr-3: #8b5a2b;
-  --instr-4: #e67700;
-  --instr-5: #6741d9;
-  --instr-6: #0c8599;
-  --instr-7: #5c940d;
-  --instr-8: #9c36b5;
+  --instr-1: #4A6178;
+  --instr-2: #8B5A2B;
+  --instr-3: #6E6A2A;
+  --instr-4: #7B4F6E;
+  --instr-5: #8F6416;
+  --instr-6: #546E66;
+  --instr-7: #5F5A7E;
+  --instr-8: #7A6A58;
 
   /* ---------- badges: text, border, fill per meaning ---------- */
   --tag-ex-text: #c2410c;
@@ -91,14 +94,12 @@
   --tag-hazard-text: #c92a2a;
   --tag-hazard-border: #ffa8a8;
   --tag-hazard-bg: #fff5f5;
-  --tag-branch-text: #2b8a3e;
+  --tag-branch-text: #1E6B30;
   --tag-branch-border: #8ce99a;
   --tag-branch-bg: #ebfbee;
   --tag-flush-text: #c2255c;
   --tag-flush-border: #faa2c1;
   --tag-flush-bg: #fff0f6;
-  --check-ok-text: #2b8a3e;
-  --check-ok-border: #b2f2bb;
 
   /* ---------- explanation panel ---------- */
   --explain-bg: #f3f7fc;
@@ -130,9 +131,16 @@
   /* ---------- shadows ---------- */
   --shadow-menu: 0 14px 40px #1d1b1626;
   --shadow-selected: 0 1px 3px #00000033;
+  --shadow-float: 0 8px 28px #1b1b1b1f;   /* the floating clock bar */
+  --shadow-pop: 0 18px 50px #1b1b1b38;    /* inspect cards and drawers */
+
+  /* ---------- radii (studio lab pages; other pages still use literal radii) ---------- */
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
 
   /* ---------- type families ---------- */
-  --sans: 'Segoe UI', system-ui, Roboto, sans-serif;
-  --mono: Consolas, ui-monospace, monospace;
+  --sans: 'Bricolage Grotesque', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', Consolas, ui-monospace, monospace;
   --diagram: Arial, Helvetica, sans-serif;
 }

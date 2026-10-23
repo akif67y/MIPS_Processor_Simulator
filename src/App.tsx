@@ -5,26 +5,29 @@ import { AddBne } from './lessons/AddBne'
 import { ExtensionPage, type ExtensionSpec } from './lessons/ExtensionPage'
 import { JAL, JR, LUI, ORI, SLT } from './lessons/extensions'
 import { Forwarding } from './lessons/Forwarding'
-import { ControlHazardLab, DataHazardLab } from './lessons/PipelineLab'
+import { ControlHazardLab } from './lessons/PipelineLab'
+import { DataHazardLab } from './lessons/DataStudio'
+import { NAV } from './nav'
 import { BranchPrediction } from './lessons/BranchPrediction'
 
 const ext = (spec: ExtensionSpec) => () => <ExtensionPage spec={spec} />
 
-// One page per lesson, addressed by the URL hash (e.g. #/datapath).
-const PAGES: { path: string; title: string; Page: ComponentType }[] = [
-  { path: 'pc-update', title: 'Next PC', Page: PcUpdate },
-  { path: 'datapath', title: 'Datapath walk', Page: DatapathWalk },
-  { path: 'add-bne', title: '+ bne', Page: AddBne },
-  { path: 'add-jr', title: '+ jr', Page: ext(JR) },
-  { path: 'add-jal', title: '+ jal', Page: ext(JAL) },
-  { path: 'add-lui', title: '+ lui', Page: ext(LUI) },
-  { path: 'add-ori', title: '+ ori', Page: ext(ORI) },
-  { path: 'slt', title: 'slt', Page: ext(SLT) },
-  { path: 'forwarding', title: 'Forwarding', Page: Forwarding },
-  { path: 'data-hazards', title: 'Data hazards', Page: DataHazardLab },
-  { path: 'control-hazards', title: 'Control hazards', Page: ControlHazardLab },
-  { path: 'branch-prediction', title: 'Branch prediction', Page: BranchPrediction },
-]
+// One page per lesson, addressed by the URL hash (e.g. #/datapath). Titles and order come from NAV.
+const VIEWS: Record<string, ComponentType> = {
+  'pc-update': PcUpdate,
+  datapath: DatapathWalk,
+  'add-bne': AddBne,
+  'add-jr': ext(JR),
+  'add-jal': ext(JAL),
+  'add-lui': ext(LUI),
+  'add-ori': ext(ORI),
+  slt: ext(SLT),
+  forwarding: Forwarding,
+  'data-hazards': DataHazardLab,
+  'control-hazards': ControlHazardLab,
+  'branch-prediction': BranchPrediction,
+}
+const PAGES = NAV.map((n) => ({ ...n, Page: VIEWS[n.path] }))
 
 // Old addresses that still work.
 const ALIASES: Record<string, string> = { 'pipeline-lab': 'data-hazards' }

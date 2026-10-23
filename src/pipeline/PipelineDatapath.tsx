@@ -18,6 +18,7 @@ import { Adder, AndGate, Box, COLORS, Label, Mux, MuxN, Oval, Wire, hot, type Lo
 import { regName, hex, dontCare, isBranch, type Controls, type Cycle, type Hardware, type Instr, type Squash } from './engine'
 import type { Phase } from './explain'
 import { instrColor, tint } from './colors'
+import { INSPECTABLE, sheetBox, unitBox, unitName, type Box as Rect, type Unit } from './units'
 
 type Group = 'pc' | 'if' | 'id' | 'hdu' | 'ex' | 'fu' | 'mem' | 'wb' | 'rf' | 'regs' | 'br'
 type Pt = [number, number]
@@ -101,7 +102,17 @@ function Halo({ x, y, children, color = COLORS.ctrl, size = 18, anchor = 'start'
 /** Text for a packet that was thrown away by a branch. */
 const goneText = (s: Squash) => `${s.why === 'flush' ? 'flushed' : 'discarded'}: ${s.instr.text}`
 
-export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }: { cycle: Cycle; phase: Phase; spotlight: boolean; values: boolean; hw?: Hardware }) {
+type Props = {
+  cycle: Cycle; phase: Phase; spotlight: boolean; values: boolean; hw?: Hardware
+  /** Studio view: no stage banners (the page shows them as chips), fill the box, show only `view` of the sheet. */
+  studio?: boolean
+  view?: Rect
+  /** Clicking a unit, pipeline register, the register file or data memory. */
+  onInspect?: (u: Unit) => void
+  selected?: Unit | null
+}
+
+export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {}, studio = false, view, onInspect, selected }: Props) {
   const BR = hw.branch
   // Room for the added units: ID mode widens ID (from x 1000), MEM mode widens EX (from 1050) and MEM (from 1600).
   const DX = BR === 'id' ? 480 : BR === 'mem' ? 240 : 0
@@ -406,8 +417,9 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
   ]
 
   const vbW = W + DX + DX2 + LEFT
+  const vb = view ?? sheetBox(hw, !studio)
   return (
-    <svg viewBox={`${-LEFT} ${-TOP} ${vbW} ${H + TOP}`} className="pipeline-svg" style={{ minWidth: Math.round((1050 * vbW) / W) }} role="img"
+    <svg viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} className={studio ? 'pipeline-svg studio' : 'pipeline-svg'} style={studio ? undefined : { minWidth: Math.round((1050 * vbW) / W) }} role="img"
       aria-label={`Pipelined datapath with forwarding and hazard detection${BR ? `, branch decided in ${BR.toUpperCase()}` : ''}, clock cycle ${c.n}`}>
       <defs>
         <pattern id="pl-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -422,7 +434,7 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
       <rect x={-LEFT} y={-TOP} width={vbW} height={H + TOP} fill="white" />
       {whole && bands.map((bd) => stageColor[bd.st] && <rect key={bd.st} x={bd.x0} y={92 - TOP} width={bd.x1 - bd.x0} height={H + TOP - 92} fill={tint(stageColor[bd.st]!, '10')} />)}
 
-      {stages.map((s) => {
+      {!studio && stages.map((s) => {
         const y0 = 8 - TOP
         const color = s.gone ? COLORS.flush : s.who && !s.bubble ? instrColor(s.who) : 'var(--gray-500)'
         const text = s.who ? (s.gone ? goneText(s.gone) : s.bubble ? 'bubble (nop)' : s.who.text) : '(empty)'
@@ -443,7 +455,7 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
       })}
 
       {wires.map((x, i) => (
-        <g key={i} opacity={op(x.g)}>
+        <g key={i} opacity={op(x.g)} data-look={x.look} data-kind={x.kind ?? 'data'}>
           <Wire pts={x.raw ? x.pts : x.pts.map(([px, py]) => [X(px), py] as Pt)} look={x.look} kind={x.kind} thick={x.thick} arrow={x.arrow ?? true} color={wireColor(x)}
             dots={x.raw ? x.dots : x.dots?.map(([px, py]) => [X(px), py] as Pt)} />
         </g>
@@ -663,6 +675,23 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
         <Label x={1775} y={807} look={c.mem.read ? 'normal' : 'exmem'} anchor="middle" size={18} bold>{c.mem.read ? `read ${c.mem.readData}` : `← ${M.writeData} at edge`}</Label>
       </g>}
       {show(['wb']) && Wb && c.wb && Wb.ctrl.RegWrite ? <Tag x={X(2065)} y={1000} anchor="end" text={`${c.wb.value}`} color={phase === 'wb' ? COLORS.rf : 'var(--ink-strong)'} /> : null}
+
+      {/* ---------- studio: the selected unit and click targets ---------- */}
+      {selected && (() => {
+        const u = unitBox(selected, hw)
+        return <g pointerEvents="none">
+          <rect x={u.x - 10} y={u.y - 10} width={u.w + 20} height={u.h + 20} rx={10} fill="none" stroke="var(--accent)" strokeOpacity={0.55} strokeWidth={11} vectorEffect="non-scaling-stroke" />
+          <rect x={u.x - 10} y={u.y - 10} width={u.w + 20} height={u.h + 20} rx={10} fill="none" stroke="var(--ink)" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+        </g>
+      })()}
+      {onInspect && INSPECTABLE.map((u) => {
+        const b = unitBox(u, hw)
+        return <rect key={u} data-unit={u} className="pl-hit" x={b.x - 6} y={b.y - 6} width={b.w + 12} height={b.h + 12} rx={8} role="button" tabIndex={0}
+          aria-label={`Inspect ${unitName(u)}`} aria-pressed={selected === u} onClick={() => onInspect(u)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onInspect(u) } }}>
+          <title>{`Inspect ${unitName(u)}`}</title>
+        </rect>
+      })}
     </svg>
   )
 }

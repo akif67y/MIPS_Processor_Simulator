@@ -110,10 +110,13 @@
 .pl-keys { font-size: 12.5px; margin: 6px 0 0; }
 .pl-checks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .pl-checks span { font: 12.5px/1.6 var(--mono); border-radius: 5px; padding: 0 6px; border: 1px solid; }
-.pl-checks .ok { color: var(--check-ok-text); border-color: var(--check-ok-border); background: var(--tag-branch-bg); }
+.pl-checks .ok { color: var(--ink); border-color: var(--control-border); background: var(--card); }
 .pl-checks .no { color: var(--gray-500); border-color: var(--gray-300); background: var(--gray-50); }
 .pl-checks .res { font-weight: 700; }
-.pl-checks .res.ok { color: white; background: var(--check-ok-text); border-color: var(--check-ok-text); }
+.pl-checks .res.ok { color: white; background: var(--primary); border-color: var(--primary); }
+.pl-checks .res.ok.ex { background: var(--fwd-exmem); border-color: var(--fwd-exmem); }
+.pl-checks .res.ok.mem { background: var(--fwd-memwb); border-color: var(--fwd-memwb); }
+.pl-checks .res.ok.hazard { background: var(--hazard); border-color: var(--hazard); }
 /* Wide screens: the explanation moves beside the diagram. */
 @media (min-width: 1900px) {
   .pl-stage { grid-template-columns: minmax(0, 1fr) 420px; align-items: start; }
@@ -188,8 +191,8 @@
 .pl-hw button { display: grid; text-align: left; border: 1px solid var(--control-border); background: var(--card); border-radius: 9px; padding: 4px 12px; cursor: pointer; line-height: 1.3; }
 .pl-hw button b { font-size: 14px; }
 .pl-hw button small { font-size: 11.5px; color: var(--muted); }
-.pl-hw button:hover:not(:disabled) { border-color: var(--branch); }
-.pl-hw button[aria-checked='true'] { border-color: var(--branch); background: var(--tag-branch-bg); box-shadow: inset 0 0 0 1px var(--branch); }
+.pl-hw button:hover:not(:disabled) { border-color: var(--primary); }
+.pl-hw button[aria-checked='true'] { border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
 .pl-hw button:disabled { opacity: 0.4; cursor: not-allowed; }
 .pl-hw-now { font-size: 14px; line-height: 1.8; margin: 0 0 10px; }
 .pl-note { font-size: 13px; margin: 6px 0 0; }
@@ -217,7 +220,7 @@
 .bp-controls > div[role='radiogroup'] { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .bp-controls button { display: grid; text-align: left; border: 1px solid var(--control-border); background: var(--card); border-radius: 9px; padding: 4px 12px; cursor: pointer; line-height: 1.3; }
 .bp-controls button small { font-size: 11.5px; color: var(--muted); }
-.bp-controls button[aria-checked='true'] { border-color: var(--branch); background: var(--tag-branch-bg); box-shadow: inset 0 0 0 1px var(--branch); }
+.bp-controls button[aria-checked='true'] { border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
 .bp-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .bp-fields label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--gray-700); }
 .bp-fields input, .bp-fields select { font: 14px var(--sans); border: 1px solid var(--control-border); border-radius: 7px; padding: 4px 8px; background: var(--card); }
@@ -265,7 +268,7 @@
 /* ---------- whole cycle / focus steps ---------- */
 .pl-mode { display: flex; padding: 2px; background: var(--gray-100); border-radius: 9px; }
 .pl-mode button { border: 0; background: none; border-radius: 7px; padding: 5px 11px; cursor: pointer; font-size: 13px; color: var(--gray-700); white-space: nowrap; }
-.pl-mode button[aria-checked='true'] { background: var(--branch); color: white; font-weight: 600; box-shadow: var(--shadow-selected); }
+.pl-mode button[aria-checked='true'] { background: var(--primary); color: white; font-weight: 600; box-shadow: var(--shadow-selected); }
 .pl-phases-label { align-self: center; padding: 0 4px 0 8px; font-size: 12px; color: var(--muted); }
 .pl-timing { margin: 2px 0 12px; font-size: 12.5px; max-width: 760px; }
 .pl-timing-head, .pl-timing-row { display: grid; grid-template-columns: 40px 1fr 1fr; align-items: center; }

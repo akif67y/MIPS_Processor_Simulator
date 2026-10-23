@@ -1,6 +1,7 @@
 // Turns the simulation into clock steps and plain-language explanations.
 // Text markup: `code` and **bold**; the page renders it.
 
+import type { Unit } from './units.ts'
 import { isBranch, regName, type CmpFwd, type Controls, type Cycle, type Fwd, type FwdCheck, type Instr, type Simulation, type Squash } from './engine.ts'
 export type Phase = 'edge' | 'wb' | 'id' | 'ex' | 'br' | 'all' // 'all' = the whole cycle at once
 export type Step = { cycle: number; phase: Phase } // cycle is an index into sim.cycles
@@ -36,7 +37,18 @@ export function buildSteps(sim: Simulation, mode: ViewMode = 'focus'): Step[] {
 
 export type Check = { text: string; ok: boolean }
 export type Stage = 'IF' | 'ID' | 'EX' | 'MEM' | 'WB'
-export type Line = { text: string; tone?: 'ex' | 'mem' | 'hazard' | 'rf' | 'muted' | 'branch' | 'flush'; checks?: Check[]; result?: string; stage?: Stage }
+/** `at`: the unit the line talks about (the studio view pins it there); none = no single location.
+ *  `label`: the key value, shown next to the pin. */
+export type Line = { text: string; tone?: 'ex' | 'mem' | 'hazard' | 'rf' | 'muted' | 'branch' | 'flush'; checks?: Check[]; result?: string; stage?: Stage; at?: Unit; label?: string }
+
+/** The meaning of a check result: forwarding from EX/MEM or MEM/WB, a stall, or nothing. */
+export function resultTone(result: string): 'ex' | 'mem' | 'hazard' | null {
+  if (result === 'false' || result === 'no stall') return null
+  if (/= 10|^forward/.test(result)) return 'ex'
+  if (/= 01/.test(result)) return 'mem'
+  if (/STALL/.test(result)) return 'hazard'
+  return null
+}
 export type Explanation = { title: string; tone: 'normal' | 'hazard' | 'forward' | 'rf' | 'branch' | 'flush'; lines: Line[] }
 
 const q = (i: Instr) => `\`${i.text}\``
@@ -65,7 +77,7 @@ function edge(sim: Simulation, k: number): Explanation {
       tone: 'normal',
       lines: [
         { text: `PC = ${c.at.pc}. All four pipeline registers are empty. Every click on **Next** moves to the next sub-step of the clock cycle: ↑ edge → 1st half → 2nd half → EX + MEM${sim.hw.branch ? ' → Branch (only when a branch is decided)' : ''}.` },
-        { text: `The first instruction, ${who(sim.program[0])}, is fetched in this cycle.` },
+        { text: `The first instruction, ${who(sim.program[0])}, is fetched in this cycle.`, at: 'imem' },
       ],
     }
   }
@@ -73,28 +85,28 @@ function edge(sim: Simulation, k: number): Explanation {
   const lines: Line[] = []
   const stalled = p.hazard.stall && !p.hazard.overridden
   const flushed = p.squash?.why === 'flush'
-  if (p.pcSrc) lines.push({ text: `**PC ← ${c.at.pc}**, the branch target: PCSrc was 1, so the PC mux chose the target instead of PC + 4.`, tone: 'branch' })
-  else if (p.waiting && c.at.pc === p.at.pc) lines.push({ text: `**PC held** at ${c.at.pc}: the pipeline is still waiting for the branch, so the same address is fetched again.`, tone: 'flush' })
-  else if (stalled) lines.push({ text: `**PC held** at ${c.at.pc} (PCWrite was 0), so ${c.fetch.instr ? q(c.fetch.instr) : 'the same instruction'} is fetched again.`, tone: 'hazard' })
-  else lines.push({ text: `PC ← ${c.at.pc}${c.at.pc === p.at.pc ? ' (no more instructions to fetch)' : ''}.` })
+  if (p.pcSrc) lines.push({ text: `**PC ← ${c.at.pc}**, the branch target: PCSrc was 1, so the PC mux chose the target instead of PC + 4.`, tone: 'branch', at: 'pc' })
+  else if (p.waiting && c.at.pc === p.at.pc) lines.push({ text: `**PC held** at ${c.at.pc}: the pipeline is still waiting for the branch, so the same address is fetched again.`, tone: 'flush', at: 'pc' })
+  else if (stalled) lines.push({ text: `**PC held** at ${c.at.pc} (PCWrite was 0), so ${c.fetch.instr ? q(c.fetch.instr) : 'the same instruction'} is fetched again.`, tone: 'hazard', at: 'pc' })
+  else lines.push({ text: `PC ← ${c.at.pc}${c.at.pc === p.at.pc ? ' (no more instructions to fetch)' : ''}.`, at: 'pc' })
   const ifid = c.at.ifid
-  if (stalled) lines.push({ text: `**IF/ID held** (IF/IDWrite was 0): ${ifid ? who(ifid.instr) : 'it'} stays in ID and is decoded again.`, tone: 'hazard' })
-  else if (ifid?.squashed?.why === 'flush') lines.push({ text: `**IF/ID ← nop.** IF.Flush cleared the instruction word of ${who(ifid.squashed.instr)} to 0, and the all-zero word is \`nop\`. It goes down the pipeline doing nothing.`, tone: 'flush' })
-  else if (ifid?.squashed) lines.push({ text: `**IF/ID ← nop.** ${who(ifid.squashed.instr)} was fetched while the branch was undecided, so IF.Flush threw it away (stall on branch, slides 26–27).`, tone: 'flush' })
-  else lines.push({ text: ifid ? `IF/ID ← ${who(ifid.instr)}, just fetched, with PC + 4 = ${ifid.pc4}.` : 'IF/ID ← empty.' })
+  if (stalled) lines.push({ text: `**IF/ID held** (IF/IDWrite was 0): ${ifid ? who(ifid.instr) : 'it'} stays in ID and is decoded again.`, tone: 'hazard', at: 'ifid' })
+  else if (ifid?.squashed?.why === 'flush') lines.push({ text: `**IF/ID ← nop.** IF.Flush cleared the instruction word of ${who(ifid.squashed.instr)} to 0, and the all-zero word is \`nop\`. It goes down the pipeline doing nothing.`, tone: 'flush', at: 'ifid' })
+  else if (ifid?.squashed) lines.push({ text: `**IF/ID ← nop.** ${who(ifid.squashed.instr)} was fetched while the branch was undecided, so IF.Flush threw it away (stall on branch, slides 26–27).`, tone: 'flush', at: 'ifid' })
+  else lines.push({ text: ifid ? `IF/ID ← ${who(ifid.instr)}, just fetched, with PC + 4 = ${ifid.pc4}.` : 'IF/ID ← empty.', at: ifid ? 'ifid' : undefined })
   const idex = c.at.idex
-  if (idex?.bubble && idex.squashed && flushed && p.squash?.idex) lines.push({ text: `**ID/EX ← bubble.** ID.Flush zeroed every control bit of ${who(idex.squashed.instr)}, which was in ID on the wrong path (slide 77: set control values to 0).`, tone: 'flush' })
-  else if (idex?.bubble && !idex.squashed) lines.push({ text: `**ID/EX ← bubble.** The control mux chose 0, so every WB, M and EX control bit is 0 (slide 71). The data fields still hold ${q(idex.instr)}'s values, but with all controls 0 nothing uses them.`, tone: 'hazard' })
-  else if (idex && !idex.bubble && !idex.squashed) lines.push({ text: `ID/EX ← ${who(idex.instr)}: its controls, register values, immediate and the register numbers Rs, Rt, Rd.` })
-  else lines.push({ text: `ID/EX ← ${slot(idex)}.`, tone: idex ? 'muted' : undefined })
+  if (idex?.bubble && idex.squashed && flushed && p.squash?.idex) lines.push({ text: `**ID/EX ← bubble.** ID.Flush zeroed every control bit of ${who(idex.squashed.instr)}, which was in ID on the wrong path (slide 77: set control values to 0).`, tone: 'flush', at: 'idex' })
+  else if (idex?.bubble && !idex.squashed) lines.push({ text: `**ID/EX ← bubble.** The control mux chose 0, so every WB, M and EX control bit is 0 (slide 71). The data fields still hold ${q(idex.instr)}'s values, but with all controls 0 nothing uses them.`, tone: 'hazard', at: 'idex' })
+  else if (idex && !idex.bubble && !idex.squashed) lines.push({ text: `ID/EX ← ${who(idex.instr)}: its controls, register values, immediate and the register numbers Rs, Rt, Rd.`, at: 'idex' })
+  else lines.push({ text: `ID/EX ← ${slot(idex)}.`, tone: idex ? 'muted' : undefined, at: idex ? 'idex' : undefined })
   const em = c.at.exmem
-  if (em?.squashed && flushed && p.squash?.exmem) lines.push({ text: `**EX/MEM ← bubble.** EX.Flush zeroed the controls of ${who(em.squashed.instr)}, which was in EX on the wrong path.`, tone: 'flush' })
-  else if (em && !em.bubble && !em.squashed) lines.push({ text: `EX/MEM ← ${who(em.instr)}: ALU result ${em.aluResult}${em.ctrl.MemWrite ? `, write data ${em.writeData}` : ''}${em.ctrl.RegWrite ? `, destination ${regName(em.regRd)}` : ''}${sim.hw.branch === 'mem' && em.ctrl.Branch ? `, branch target ${em.target}, Zero = ${em.zero}` : ''}.` })
-  else lines.push({ text: `EX/MEM ← ${slot(em)}.`, tone: em ? 'muted' : undefined })
+  if (em?.squashed && flushed && p.squash?.exmem) lines.push({ text: `**EX/MEM ← bubble.** EX.Flush zeroed the controls of ${who(em.squashed.instr)}, which was in EX on the wrong path.`, tone: 'flush', at: 'exmem' })
+  else if (em && !em.bubble && !em.squashed) lines.push({ text: `EX/MEM ← ${who(em.instr)}: ALU result ${em.aluResult}${em.ctrl.MemWrite ? `, write data ${em.writeData}` : ''}${em.ctrl.RegWrite ? `, destination ${regName(em.regRd)}` : ''}${sim.hw.branch === 'mem' && em.ctrl.Branch ? `, branch target ${em.target}, Zero = ${em.zero}` : ''}.`, at: 'exmem' })
+  else lines.push({ text: `EX/MEM ← ${slot(em)}.`, tone: em ? 'muted' : undefined, at: em ? 'exmem' : undefined })
   const mw = c.at.memwb
-  if (mw && !mw.bubble && !mw.squashed) lines.push({ text: `MEM/WB ← ${who(mw.instr)}${mw.ctrl.MemRead ? `: data read from memory = ${mw.readData}` : mw.ctrl.RegWrite ? `: ALU result ${mw.aluResult}` : ''}${mw.ctrl.RegWrite ? `, destination ${regName(mw.regRd)}` : ''}.` })
-  else lines.push({ text: `MEM/WB ← ${slot(mw)}.`, tone: mw ? 'muted' : undefined })
-  if (p.mem?.write) lines.push({ text: `Data memory: Mem[${p.mem.address}] ← ${p.at.exmem!.writeData} was written at this edge.`, tone: 'mem' })
+  if (mw && !mw.bubble && !mw.squashed) lines.push({ text: `MEM/WB ← ${who(mw.instr)}${mw.ctrl.MemRead ? `: data read from memory = ${mw.readData}` : mw.ctrl.RegWrite ? `: ALU result ${mw.aluResult}` : ''}${mw.ctrl.RegWrite ? `, destination ${regName(mw.regRd)}` : ''}.`, at: 'memwb' })
+  else lines.push({ text: `MEM/WB ← ${slot(mw)}.`, tone: mw ? 'muted' : undefined, at: mw ? 'memwb' : undefined })
+  if (p.mem?.write) lines.push({ text: `Data memory: Mem[${p.mem.address}] ← ${p.at.exmem!.writeData} was written at this edge.`, tone: 'mem', at: 'dmem' })
   const tone = p.pcSrc && flushed ? 'flush' : p.pcSrc ? 'branch' : p.waiting ? 'flush' : stalled ? 'hazard' : 'normal'
   return { title: `↑ Clock edge: cycle ${c.n} begins${p.pcSrc ? (flushed ? ' (branch taken, flush)' : ' (branch taken)') : p.waiting ? ' (waiting for a branch)' : stalled ? ' (after a stall)' : ''}`, tone, lines }
 }
@@ -116,11 +128,11 @@ function writeBack(c: Cycle): Explanation {
     lines.push({ text: `${who(i)} has RegWrite = 0 (${isBranch(i.op) ? 'a branch' : 'a store'} writes no register). It already finished its work${isBranch(i.op) ? '' : ' in MEM'}, so nothing happens here.`, tone: 'muted' })
     return { title: 'First half: nothing to write', tone: 'normal', lines }
   }
-  lines.push({ text: `MemtoReg = ${wb.memtoReg}, so the WB mux picks ${wb.memtoReg ? `the **data read from memory**` : `the **ALU result**`}: ${wb.value}.` })
+  lines.push({ text: `MemtoReg = ${wb.memtoReg}, so the WB mux picks ${wb.memtoReg ? `the **data read from memory**` : `the **ALU result**`}: ${wb.value}.`, at: 'wbMux', label: `MemtoReg = ${wb.memtoReg}` })
   if (wb.writes) {
-    lines.push({ text: `RegWrite = 1: **${regName(wb.rd)} ← ${wb.value}** in the first half of the cycle (it was ${wb.old}).`, tone: 'rf' })
+    lines.push({ text: `RegWrite = 1: **${regName(wb.rd)} ← ${wb.value}** in the first half of the cycle (it was ${wb.old}).`, tone: 'rf', at: 'rfWrite', label: `${regName(wb.rd)} ← ${wb.value}` })
     const reader = c.id && (c.id.sameCycleRs || c.id.sameCycleRt) ? c.id.instr : null
-    if (reader) lines.push({ text: `${who(reader)} in ID reads ${regName(wb.rd)} in the **second half**, so it already gets ${wb.value}. No forwarding needed (slide 55).`, tone: 'rf' })
+    if (reader) lines.push({ text: `${who(reader)} in ID reads ${regName(wb.rd)} in the **second half**, so it already gets ${wb.value}. No forwarding needed (slide 55).`, tone: 'rf', at: 'rfRead' })
   } else {
     lines.push({ text: `The destination is $zero. The register file ignores the write; $zero stays 0.`, tone: 'muted' })
   }
@@ -135,21 +147,21 @@ function branchHazardLines(c: Cycle, i: Instr): Line[] {
     { text: `ID/EX.RegWrite = ${b.idexRegWrite}`, ok: !!b.idexRegWrite },
     { text: `ID/EX destination (${regName(b.idexDest)}) = IF/ID.RegisterRs (${regName(i.rs)}) or Rt (${regName(i.rt)})`, ok: b.aluRs || b.aluRt },
   ]
-  lines.push({ text: 'Branch check 1 (slides 80–81): is the instruction in **EX** about to write a register the comparator needs?', checks, result: b.aluRs || b.aluRt ? 'STALL' : 'no stall', tone: b.aluRs || b.aluRt ? 'hazard' : undefined })
+  lines.push({ text: 'Branch check 1 (slides 80–81): is the instruction in **EX** about to write a register the comparator needs?', checks, result: b.aluRs || b.aluRt ? 'STALL' : 'no stall', tone: b.aluRs || b.aluRt ? 'hazard' : undefined, at: 'hdu' })
   const checks2: Check[] = [
     { text: `EX/MEM.MemRead = ${b.exmemMemRead}`, ok: !!b.exmemMemRead },
     { text: `EX/MEM.RegisterRd (${regName(b.exmemRd)}) = IF/ID.RegisterRs or Rt`, ok: b.loadRs || b.loadRt },
   ]
-  lines.push({ text: 'Branch check 2 (slides 80–81): is a **load in MEM** about to write a register the comparator needs?', checks: checks2, result: b.loadRs || b.loadRt ? 'STALL' : 'no stall', tone: b.loadRs || b.loadRt ? 'hazard' : undefined })
+  lines.push({ text: 'Branch check 2 (slides 80–81): is a **load in MEM** about to write a register the comparator needs?', checks: checks2, result: b.loadRs || b.loadRt ? 'STALL' : 'no stall', tone: b.loadRs || b.loadRt ? 'hazard' : undefined, at: 'hdu' })
   if (b.aluRs || b.aluRt) {
     const reg = regName(b.idexDest)
     lines.push(b.idexLoad
-      ? { text: `**Load right before the branch (slide 81).** ${who(e!.instr)} is in EX; ${reg} comes out of data memory only at the end of the next cycle. The comparator works in ID now, so ${q(i)} must wait: this is the first of **two** stall cycles.`, tone: 'hazard' }
-      : { text: `**ALU instruction right before the branch (slide 80).** ${who(e!.instr)} is in EX; its result ${reg} exists only at the end of this cycle. The comparator works in ID now, so ${q(i)} waits one cycle. Next cycle the value is in EX/MEM and is forwarded to the comparator.`, tone: 'hazard' })
+      ? { text: `**Load right before the branch (slide 81).** ${who(e!.instr)} is in EX; ${reg} comes out of data memory only at the end of the next cycle. The comparator works in ID now, so ${q(i)} must wait: this is the first of **two** stall cycles.`, tone: 'hazard', at: 'hdu' }
+      : { text: `**ALU instruction right before the branch (slide 80).** ${who(e!.instr)} is in EX; its result ${reg} exists only at the end of this cycle. The comparator works in ID now, so ${q(i)} waits one cycle. Next cycle the value is in EX/MEM and is forwarded to the comparator.`, tone: 'hazard', at: 'hdu' })
   } else if (b.loadRs || b.loadRt) {
-    lines.push({ text: `**Load two instructions before the branch (slide 80), or the second stall of slide 81.** ${who(m!.instr)} is in MEM; ${regName(b.exmemRd)} leaves data memory only at the end of this cycle. EX/MEM holds only its address, so nothing useful can be forwarded. Next cycle the load is in WB: written in the first half, read by the branch in the second half.`, tone: 'hazard' })
+    lines.push({ text: `**Load two instructions before the branch (slide 80), or the second stall of slide 81.** ${who(m!.instr)} is in MEM; ${regName(b.exmemRd)} leaves data memory only at the end of this cycle. EX/MEM holds only its address, so nothing useful can be forwarded. Next cycle the load is in WB: written in the first half, read by the branch in the second half.`, tone: 'hazard', at: 'hdu' })
   }
-  if (b.stall) lines.push({ text: `So the unit sets **PCWrite = 0**, **IF/IDWrite = 0** and **Stall = 1**, exactly as for a load-use hazard: PC and IF/ID hold, a bubble goes into ID/EX. The branch is decided after the stall.`, tone: 'hazard' })
+  if (b.stall) lines.push({ text: `So the unit sets **PCWrite = 0**, **IF/IDWrite = 0** and **Stall = 1**, exactly as for a load-use hazard: PC and IF/ID hold, a bubble goes into ID/EX. The branch is decided after the stall.`, tone: 'hazard', at: 'hdu' })
   return lines
 }
 
@@ -163,37 +175,39 @@ function decode(sim: Simulation, c: Cycle): Explanation {
     if (sq) {
       lines.push({ text: `ID holds the nop left by ${was(sq)}: register numbers 0, controls of \`sll $0, $0, 0\`. It cannot hurt anything.`, tone: 'muted' })
     } else {
-      lines.push({ text: `ID decodes ${who(i)}: Rs = ${regName(i.rs)}, Rt = ${regName(i.rt)}, Rd = ${regName(i.rd)}, sign-extended immediate = ${i.imm}${i.op === 'lw' || i.op === 'sw' || i.op === 'addi' ? '' : isBranch(i.op) ? ` (the branch offset in words: target = PC + 4 + ${i.imm} × 4 = ${i.target})` : ' (for R-format these bits are rd and funct; the ALU control uses the funct bits)'}. All of them go into ID/EX, whether this instruction uses them or not.` })
+      lines.push({ text: `ID decodes ${who(i)}: Rs = ${regName(i.rs)}, Rt = ${regName(i.rt)}, Rd = ${regName(i.rd)}, sign-extended immediate = ${i.imm}${i.op === 'lw' || i.op === 'sw' || i.op === 'addi' ? '' : isBranch(i.op) ? ` (the branch offset in words: target = PC + 4 + ${i.imm} × 4 = ${i.target})` : ' (for R-format these bits are rd and funct; the ALU control uses the funct bits)'}. All of them go into ID/EX, whether this instruction uses them or not.`, at: 'ifid' })
       lines.push({
         text: `Second half: reads ${regName(i.rs)} = ${d.data1} and ${regName(i.rt)} = ${d.data2}${d.sameCycleRs || d.sameCycleRt ? ` (${regName(c.wb!.rd)} was written in the first half, so this is the new value)` : ''}.`,
         tone: d.sameCycleRs || d.sameCycleRt ? 'rf' : undefined,
+        at: 'rfRead',
+        label: `${regName(i.rs)} = ${d.data1}, ${regName(i.rt)} = ${d.data2}`,
       })
-      lines.push({ text: `Control unit: ${controlText(d.ctrl, i.op, !!sim.hw.branch)}.`, tone: 'muted' })
+      lines.push({ text: `Control unit: ${controlText(d.ctrl, i.op, !!sim.hw.branch)}.`, tone: 'muted', at: 'control' })
     }
     const e = c.at.idex
     if (!e && !h.branch) {
-      lines.push({ text: 'Hazard detection unit: EX is empty, so there is nothing to compare. No stall.' })
+      lines.push({ text: 'Hazard detection unit: EX is empty, so there is nothing to compare. No stall.', at: 'hdu' })
     } else if (e) {
       const checks: Check[] = [
         { text: `ID/EX.MemRead = ${h.memRead}`, ok: !!h.memRead },
         { text: `ID/EX.RegisterRt (${regName(h.idexRt)}) = IF/ID.RegisterRs (${regName(h.ifidRs)})`, ok: h.matchRs },
         { text: `ID/EX.RegisterRt (${regName(h.idexRt)}) = IF/ID.RegisterRt (${regName(h.ifidRt)})`, ok: h.matchRt },
       ]
-      lines.push({ text: 'Hazard detection unit (slide 69): ID/EX.MemRead **and** (rt = rs **or** rt = rt)', checks, result: h.loadUse ? 'STALL' : 'no stall', tone: h.loadUse ? 'hazard' : undefined })
+      lines.push({ text: 'Hazard detection unit (slide 69): ID/EX.MemRead **and** (rt = rs **or** rt = rt)', checks, result: h.loadUse ? 'STALL' : 'no stall', tone: h.loadUse ? 'hazard' : undefined, at: 'hdu' })
       if (h.loadUse && !h.branch?.stall) {
         const load = e.instr
-        lines.push({ text: `**Load-use hazard.** ${who(load)} is in EX. Its data comes out of memory only at the end of the next cycle (MEM). ${q(i)} would need it at the start of the next cycle (EX). Forwarding cannot send data backward in time (slide 67).`, tone: 'hazard' })
-        lines.push({ text: `So the unit sets **PCWrite = 0**, **IF/IDWrite = 0** and **Stall = 1**. At the next edge: the PC and IF/ID keep their values, and the control mux sends 0s into ID/EX: a bubble (slide 72).`, tone: 'hazard' })
-        if (h.conservative) lines.push({ text: `Note: ${q(i)} does not read ${regName(h.idexRt)}. Rt is its destination. The slide-69 unit only compares register numbers, so it stalls anyway.`, tone: 'muted' })
-        else if (i.op === 'sw' && !h.matchRs) lines.push({ text: `Note: sw needs ${regName(h.idexRt)} only as store data. Slide 66 asks when that data is really needed (in MEM). The slide-69 unit does not look at that: it sees a matching rt and stalls.`, tone: 'muted' })
+        lines.push({ text: `**Load-use hazard.** ${who(load)} is in EX. Its data comes out of memory only at the end of the next cycle (MEM). ${q(i)} would need it at the start of the next cycle (EX). Forwarding cannot send data backward in time (slide 67).`, tone: 'hazard', at: 'hdu' })
+        lines.push({ text: `So the unit sets **PCWrite = 0**, **IF/IDWrite = 0** and **Stall = 1**. At the next edge: the PC and IF/ID keep their values, and the control mux sends 0s into ID/EX: a bubble (slide 72).`, tone: 'hazard', at: 'hdu' })
+        if (h.conservative) lines.push({ text: `Note: ${q(i)} does not read ${regName(h.idexRt)}. Rt is its destination. The slide-69 unit only compares register numbers, so it stalls anyway.`, tone: 'muted', at: 'hdu' })
+        else if (i.op === 'sw' && !h.matchRs) lines.push({ text: `Note: sw needs ${regName(h.idexRt)} only as store data. Slide 66 asks when that data is really needed (in MEM). The slide-69 unit does not look at that: it sees a matching rt and stalls.`, tone: 'muted', at: 'hdu' })
       } else if (!h.loadUse && h.memRead) {
-        lines.push({ text: `${who(e.instr)} is a load, but it loads ${regName(h.idexRt)}, which ${q(i)} does not use. No stall.` })
+        lines.push({ text: `${who(e.instr)} is a load, but it loads ${regName(h.idexRt)}, which ${q(i)} does not use. No stall.`, at: 'hdu' })
       } else if (!h.loadUse && !h.branch) {
-        lines.push({ text: `${e.bubble || e.squashed ? 'EX holds a bubble' : `${who(e.instr)} in EX is not a load`} (MemRead = 0). Any value it produces can be forwarded in time. No stall.` })
+        lines.push({ text: `${e.bubble || e.squashed ? 'EX holds a bubble' : `${who(e.instr)} in EX is not a load`} (MemRead = 0). Any value it produces can be forwarded in time. No stall.`, at: 'hdu' })
       }
     }
     if (h.branch) lines.push(...branchHazardLines(c, i))
-    if (h.overridden) lines.push({ text: `But a taken branch is in MEM this cycle: these instructions are on the wrong path and will be flushed, so the flush wins over the stall (see the Branch step).`, tone: 'flush' })
+    if (h.overridden) lines.push({ text: `But a taken branch is in MEM this cycle: these instructions are on the wrong path and will be flushed, so the flush wins over the stall (see the Branch step).`, tone: 'flush', at: 'hdu' })
     if (!h.stall && isBranch(i.op) && !sq) {
       if (sim.hw.branch === 'id') lines.push({ text: `The comparator and the target adder decide ${q(i)} now, in ID. See the **Branch** step.`, tone: 'branch' })
       else if (sim.hw.policy === 'stall') lines.push({ text: `Control sees a branch. With **stall on branch**, everything IF fetches until the branch is decided in MEM is thrown away.`, tone: 'flush' })
@@ -203,10 +217,10 @@ function decode(sim: Simulation, c: Cycle): Explanation {
   const f = c.fetch.instr
   const stalled = h.stall && !h.overridden
   if (f) lines.push(stalled
-    ? { text: `IF fetches ${who(f)} at address ${c.fetch.pc}. Because PCWrite = 0 the PC does not advance, so the same instruction is fetched again next cycle.`, tone: 'hazard' }
+    ? { text: `IF fetches ${who(f)} at address ${c.fetch.pc}. Because PCWrite = 0 the PC does not advance, so the same instruction is fetched again next cycle.`, tone: 'hazard', at: 'imem' }
     : c.waiting
-      ? { text: `IF fetches ${who(f)} at address ${c.fetch.pc}, but a branch is still undecided, so this fetch will be thrown away at the next edge.`, tone: 'flush' }
-      : { text: `IF fetches ${who(f)} at address ${c.fetch.pc}.${c.squash?.ifid ? ' (It will be flushed: see the Branch step.)' : ` At the next edge: PC ← ${c.next.pc}, IF/ID ← this instruction.`}`, tone: c.squash?.ifid ? 'flush' : undefined })
+      ? { text: `IF fetches ${who(f)} at address ${c.fetch.pc}, but a branch is still undecided, so this fetch will be thrown away at the next edge.`, tone: 'flush', at: 'imem' }
+      : { text: `IF fetches ${who(f)} at address ${c.fetch.pc}.${c.squash?.ifid ? ' (It will be flushed: see the Branch step.)' : ` At the next edge: PC ← ${c.next.pc}, IF/ID ← this instruction.`}`, tone: c.squash?.ifid ? 'flush' : undefined, at: 'imem', label: `address ${c.fetch.pc}` })
   else lines.push({ text: 'IF: there are no more instructions to fetch.', tone: 'muted' })
   lines[lines.length - 1].stage = 'IF'
   const title = stalled ? (h.branch?.stall ? 'Second half: branch operands not ready, stall' : 'Second half: hazard detected, stall') : 'Second half: ID reads registers · hazard check · IF fetches'
@@ -224,15 +238,16 @@ function cond(k: FwdCheck, field: string, reg: number): Check[] {
 
 function forwardLines(f: Fwd, c: Cycle): Line[] {
   const name = f.field === 'Rs' ? 'ForwardA' : 'ForwardB'
+  const at: Unit = f.field === 'Rs' ? 'muxA' : 'muxB'
   const lines: Line[] = []
   const src = f.sel === '10' ? c.at.exmem! : f.sel === '01' ? c.at.memwb! : null
-  lines.push({ text: `**${name}** (ALU input ${f.field === 'Rs' ? 'A' : 'B'}, ID/EX.Register${f.field} = ${regName(f.reg)}). EX hazard, slide 61:`, checks: cond(f.ex, `ID/EX.Register${f.field}`, f.reg), result: f.ex.holds ? `${name} = 10` : 'false' })
-  lines.push({ text: `MEM hazard, slide 64 (only if the EX hazard is false):`, checks: [...cond(f.mem, `ID/EX.Register${f.field}`, f.reg), { text: 'not EX hazard', ok: !f.ex.holds }], result: !f.ex.holds && f.mem.holds ? `${name} = 01` : 'false' })
-  if (f.sel === '10') lines.push({ text: `→ **${name} = 10**: the value ${f.value} comes from EX/MEM: the ALU result of ${who(src!.instr)}, which is now in MEM.`, tone: 'ex' })
-  else if (f.sel === '01') lines.push({ text: `→ **${name} = 01**: the value ${f.value} comes from MEM/WB: ${src!.ctrl.MemtoReg ? 'the data loaded by ' : 'the ALU result of '}${who(src!.instr)}, which is now in WB.`, tone: 'mem' })
-  else lines.push({ text: `→ ${name} = 00: the value ${f.value} read from the register file in ID is used.` })
-  if (f.double) lines.push({ text: `**Double data hazard** (slides 62–64): MEM/WB also holds a new ${regName(f.reg)} (${c.wb!.value}), but it is older. The revised MEM condition rejects it, and the newest value ${f.value} from EX/MEM wins.`, tone: 'ex' })
-  if (f.unused && f.sel !== '00') lines.push({ text: `Rt of ${q(c.at.idex!.instr)} is its destination, not a source. The forwarding unit still matches the number, but ALUSrc = 1 chooses the immediate, so the forwarded value is not used.`, tone: 'muted' })
+  lines.push({ text: `**${name}** (ALU input ${f.field === 'Rs' ? 'A' : 'B'}, ID/EX.Register${f.field} = ${regName(f.reg)}). EX hazard, slide 61:`, checks: cond(f.ex, `ID/EX.Register${f.field}`, f.reg), result: f.ex.holds ? `${name} = 10` : 'false', at })
+  lines.push({ text: `MEM hazard, slide 64 (only if the EX hazard is false):`, checks: [...cond(f.mem, `ID/EX.Register${f.field}`, f.reg), { text: 'not EX hazard', ok: !f.ex.holds }], result: !f.ex.holds && f.mem.holds ? `${name} = 01` : 'false', at })
+  if (f.sel === '10') lines.push({ text: `→ **${name} = 10**: the value ${f.value} comes from EX/MEM: the ALU result of ${who(src!.instr)}, which is now in MEM.`, tone: 'ex', at })
+  else if (f.sel === '01') lines.push({ text: `→ **${name} = 01**: the value ${f.value} comes from MEM/WB: ${src!.ctrl.MemtoReg ? 'the data loaded by ' : 'the ALU result of '}${who(src!.instr)}, which is now in WB.`, tone: 'mem', at })
+  else lines.push({ text: `→ ${name} = 00: the value ${f.value} read from the register file in ID is used.`, at, label: `${name} = 00` })
+  if (f.double) lines.push({ text: `**Double data hazard** (slides 62–64): MEM/WB also holds a new ${regName(f.reg)} (${c.wb!.value}), but it is older. The revised MEM condition rejects it, and the newest value ${f.value} from EX/MEM wins.`, tone: 'ex', at: 'fu' })
+  if (f.unused && f.sel !== '00') lines.push({ text: `Rt of ${q(c.at.idex!.instr)} is its destination, not a source. The forwarding unit still matches the number, but ALUSrc = 1 chooses the immediate, so the forwarded value is not used.`, tone: 'muted', at: 'aluSrc' })
   return lines
 }
 
@@ -257,21 +272,21 @@ function execute(sim: Simulation, c: Cycle): Explanation {
     const x = c.ex
     lines.push(...forwardLines(x.fa, c))
     if (e.instr.op === 'sw' || !x.fb.unused) lines.push(...forwardLines(x.fb, c))
-    else lines.push({ text: `ForwardB = ${x.fb.sel}${x.fb.unused && x.fb.sel !== '00' ? ' (not used)' : ''}: ${q(e.instr)} has no rt source. ALUSrc = 1 selects the immediate.`, tone: 'muted' })
+    else lines.push({ text: `ForwardB = ${x.fb.sel}${x.fb.unused && x.fb.sel !== '00' ? ' (not used)' : ''}: ${q(e.instr)} has no rt source. ALUSrc = 1 selects the immediate.`, tone: 'muted', at: 'aluSrc' })
     forwarded = x.fa.sel !== '00' || (x.fb.sel !== '00' && !x.fb.unused)
-    lines.push({ text: `ALUSrc = ${e.ctrl.ALUSrc}: ALU input B = ${e.ctrl.ALUSrc ? `the sign-extended immediate ${e.imm}` : `the ForwardB mux output ${x.fb.value}`}. ALU control (ALUOp = ${e.ctrl.ALUOp.toString(2).padStart(2, '0')}${e.ctrl.ALUOp === 2 ? `, funct = ${(e.imm & 63).toString(2).padStart(6, '0')}` : ''}) → **${x.aluCtl.name}**: ${aluText(x.aluCtl.name, x.aluA, x.aluB)} = **${x.result}**.` })
+    lines.push({ text: `ALUSrc = ${e.ctrl.ALUSrc}: ALU input B = ${e.ctrl.ALUSrc ? `the sign-extended immediate ${e.imm}` : `the ForwardB mux output ${x.fb.value}`}. ALU control (ALUOp = ${e.ctrl.ALUOp.toString(2).padStart(2, '0')}${e.ctrl.ALUOp === 2 ? `, funct = ${(e.imm & 63).toString(2).padStart(6, '0')}` : ''}) → **${x.aluCtl.name}**: ${aluText(x.aluCtl.name, x.aluA, x.aluB)} = **${x.result}**.`, at: 'alu', label: `${aluText(x.aluCtl.name, x.aluA, x.aluB)} = ${x.result}` })
     if (isBranch(e.instr.op)) {
       lines.push({ text: `Branch in EX (Fig. 4.51): **Zero = ${x.zero}** (${x.aluA} ${x.zero ? '=' : '≠'} ${x.aluB}). The branch adder computes PC + 4 + offset × 4 = ${e.pc4} + ${e.imm} × 4 = **${x.target}** (shift left 2 then add). Both go into EX/MEM; the decision is made in MEM next cycle.`, tone: 'branch' })
       lines.push({ text: `Meanwhile two more instructions have entered behind the branch (in ID and IF).`, tone: 'muted' })
     }
-    if (e.ctrl.MemWrite) lines.push({ text: `Store data: the ForwardB mux output (${x.writeData}) goes into EX/MEM as the data memory write data.` })
-    if (e.ctrl.RegWrite) lines.push({ text: `RegDst = ${e.ctrl.RegDst}: the destination is ${e.ctrl.RegDst ? 'Rd' : 'Rt'} = ${regName(x.regDst)}. It travels on as EX/MEM.RegisterRd.`, tone: 'muted' })
+    if (e.ctrl.MemWrite) lines.push({ text: `Store data: the ForwardB mux output (${x.writeData}) goes into EX/MEM as the data memory write data.`, at: 'exmem' })
+    if (e.ctrl.RegWrite) lines.push({ text: `RegDst = ${e.ctrl.RegDst}: the destination is ${e.ctrl.RegDst ? 'Rd' : 'Rt'} = ${regName(x.regDst)}. It travels on as EX/MEM.RegisterRd.`, tone: 'muted', at: 'regDst', label: `RegDst = ${e.ctrl.RegDst} → ${regName(x.regDst)}` })
   }
   const m = c.at.exmem
   if (m?.squashed) lines.push({ text: `MEM holds ${slot(m)}: memory is not touched.`, tone: 'muted' })
   else if (m?.bubble) lines.push({ text: 'MEM holds the bubble: MemRead = MemWrite = 0, so memory is not touched.', tone: 'muted' })
-  else if (m && c.mem?.read) lines.push({ text: `MEM: ${who(m.instr)} reads Mem[${c.mem.address}] = **${c.mem.readData}**. It goes into MEM/WB at the next edge, and from there it can be forwarded (01) to the instruction in EX.`, tone: 'mem' })
-  else if (m && c.mem?.write) lines.push({ text: `MEM: ${who(m.instr)} writes **${m.writeData}** to Mem[${c.mem.address}] at the end of this cycle.`, tone: 'mem' })
+  else if (m && c.mem?.read) lines.push({ text: `MEM: ${who(m.instr)} reads Mem[${c.mem.address}] = **${c.mem.readData}**. It goes into MEM/WB at the next edge, and from there it can be forwarded (01) to the instruction in EX.`, tone: 'mem', at: 'dmem', label: `read ${c.mem.readData}` })
+  else if (m && c.mem?.write) lines.push({ text: `MEM: ${who(m.instr)} writes **${m.writeData}** to Mem[${c.mem.address}] at the end of this cycle.`, tone: 'mem', at: 'dmem', label: `Mem[${c.mem.address}] ← ${m.writeData}` })
   else if (m && isBranch(m.instr.op) && sim.hw.branch === 'mem') lines.push({ text: `MEM: ${who(m.instr)} does not access memory, but this is where it is decided. See the **Branch** step.`, tone: 'branch' })
   else if (m) lines.push({ text: `MEM: ${who(m.instr)} does not access memory. Its ALU result ${m.aluResult} goes to MEM/WB.`, tone: 'muted' })
   if (m) lines[lines.length - 1].stage = 'MEM'

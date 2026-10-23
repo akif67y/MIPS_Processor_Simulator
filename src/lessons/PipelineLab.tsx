@@ -3,7 +3,7 @@ import { PipelineDatapath } from '../pipeline/PipelineDatapath'
 import { instrColor, tint } from '../pipeline/colors'
 import { EXAMPLES, type Example } from '../pipeline/examples'
 import { BRANCH_EXAMPLES } from '../pipeline/branchExamples'
-import { buildSteps, controlText, explain, phasesFor, wholeCycle, type Line, type Phase, type Stage, type StageCard, type Step, type ViewMode } from '../pipeline/explain'
+import { buildSteps, controlText, explain, phasesFor, resultTone, wholeCycle, type Line, type Phase, type Stage, type StageCard, type Step, type ViewMode } from '../pipeline/explain'
 import {
   branchRuns, dependences, destination, hex, isBranch, NAMES, parseInitial, parseProgram, real, regName, simulate,
   type BranchAt, type Controls, type Cycle, type Hardware, type Instr, type Latches, type Policy, type Simulation, type Squash,
@@ -11,12 +11,12 @@ import {
 import './pipeline.css'
 
 /** Renders the explanation markup: `code` and **bold**. */
-function Md({ text }: { text: string }) {
+export function Md({ text }: { text: string }) {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
   return <>{parts.map((p, i) => p.startsWith('`') ? <code key={i}>{p.slice(1, -1)}</code> : p.startsWith('**') ? <b key={i}>{p.slice(2, -2)}</b> : <Fragment key={i}>{p}</Fragment>)}</>
 }
 
-function Chip({ i, bubble, gone }: { i: Instr | null | undefined; bubble?: boolean; gone?: Squash }) {
+export function Chip({ i, bubble, gone }: { i: Instr | null | undefined; bubble?: boolean; gone?: Squash }) {
   if (gone) return <span className="pl-chip gone" title={`${gone.why === 'flush' ? 'flushed' : 'discarded'}: ${gone.instr.text}`}>✕ I{gone.instr.id + 1}</span>
   if (!i) return <span className="pl-chip empty">empty</span>
   if (bubble) return <span className="pl-chip bubble">bubble</span>
@@ -27,7 +27,7 @@ const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n 
 
 // ---------- lessons ----------
 
-type Lesson = {
+export type Lesson = {
   crumb: string
   title: string
   examples: (Example & { hw?: Hardware })[]
@@ -36,7 +36,7 @@ type Lesson = {
   branches: boolean
 }
 
-const DATA_LESSON: Lesson = {
+export const DATA_LESSON: Lesson = {
   crumb: 'Chapter 4 Part 2 · slides 52–75',
   title: 'Data hazards: forwarding, hazard detection and stalls',
   examples: EXAMPLES,
@@ -51,7 +51,6 @@ const CONTROL_LESSON: Lesson = {
   branches: true,
 }
 
-export const DataHazardLab = () => <PipelineLab lesson={DATA_LESSON} />
 export const ControlHazardLab = () => <PipelineLab lesson={CONTROL_LESSON} />
 
 const WHERE: Record<BranchAt, { label: string; slide: string; text: string }> = {
@@ -67,7 +66,7 @@ const penalty = (hw: Hardware, taken: boolean) => (hw.policy === 'delayed' ? 0 :
 
 // ---------- program overview (shown before clocking starts) ----------
 
-function ProgramTable({ sim }: { sim: Simulation }) {
+export function ProgramTable({ sim }: { sim: Simulation }) {
   const branches = !!sim.hw.branch
   return <table className="pl-program">
     <thead><tr><th></th>{branches && <th>Label</th>}<th>Instruction</th><th>Address</th><th>Machine code</th><th>{branches ? 'Effect' : 'Writes'}</th></tr></thead>
@@ -198,7 +197,7 @@ function BranchOverview({ sim, goal, onStart, others, onPick }: { sim: Simulatio
 // ---------- pipeline register contents ----------
 
 type Row = [string, string]
-const ctrl3 = (c: Controls, op: Instr['op'] | undefined, branchInM: boolean) => {
+export const ctrl3 = (c: Controls, op: Instr['op'] | undefined, branchInM: boolean) => {
   const t = controlText(c, op, true)
   const get = (k: string) => t.match(new RegExp(`${k}=(\\w+)`))![1]
   return {
@@ -207,7 +206,7 @@ const ctrl3 = (c: Controls, op: Instr['op'] | undefined, branchInM: boolean) => 
     EX: `RegDst=${get('RegDst')} ALUOp=${get('ALUOp')} ALUSrc=${get('ALUSrc')}`,
   }
 }
-function fields(l: Latches, key: 'pc' | 'ifid' | 'idex' | 'exmem' | 'memwb', hw: Hardware): Row[] {
+export function fields(l: Latches, key: 'pc' | 'ifid' | 'idex' | 'exmem' | 'memwb', hw: Hardware): Row[] {
   const bm = hw.branch === 'mem'
   if (key === 'pc') return [['PC', `${l.pc}`]]
   if (key === 'ifid') return l.ifid ? [['Instruction', `${hex(l.ifid.instr.word)}  ${l.ifid.instr.text}`], ['PC + 4', `${l.ifid.pc4}`]] : []
@@ -229,7 +228,7 @@ function fields(l: Latches, key: 'pc' | 'ifid' | 'idex' | 'exmem' | 'memwb', hw:
   return [['WB', c.WB], ['Read data', `${p.readData}`], ['ALU result', `${p.aluResult}`], ['RegisterRd', regName(p.regRd)]]
 }
 
-function Latch({ title, k, c, prev, edge, hw }: { title: string; k: 'pc' | 'ifid' | 'idex' | 'exmem' | 'memwb'; c: Cycle; prev: Cycle | null; edge: boolean; hw: Hardware }) {
+export function Latch({ title, k, c, prev, edge, hw }: { title: string; k: 'pc' | 'ifid' | 'idex' | 'exmem' | 'memwb'; c: Cycle; prev: Cycle | null; edge: boolean; hw: Hardware }) {
   const now = fields(c.at, k, hw), next = fields(c.next, k, hw), before = prev ? fields(prev.at, k, hw) : []
   const pkt = k === 'pc' ? null : c.at[k]
   const held = (k === 'pc' || k === 'ifid') && c.hazard.stall && !c.hazard.overridden
@@ -263,12 +262,35 @@ function Latch({ title, k, c, prev, edge, hw }: { title: string; k: 'pc' | 'ifid
   </article>
 }
 
+// ---------- register file and data memory ----------
+
+export function RegisterFile({ c, phase }: { c: Cycle; phase: Phase }) {
+  const shown = phase === 'edge' ? c.regs : c.regsMid
+  const wbReg = c.wb?.writes && phase !== 'edge' ? c.wb.rd : -1
+  return <div>
+    <div className="pl-head"><h2>Register file</h2><span className="muted">{phase === 'edge' ? 'At the start of the cycle.' : 'After the first-half write.'} Hover for hex.</span></div>
+    <div className="pl-regs">{NAMES.map((n, r) => <div key={n} className={r === wbReg ? 'written' : ''} title={hex(shown[r])}>
+      <span>{regName(r)} <small>{regName(r) === `$${n}` ? r : n}</small></span><b>{r === wbReg && c.wb ? <><s>{c.wb.old}</s> {shown[r]}</> : shown[r]}</b>
+    </div>)}</div>
+  </div>
+}
+
+export function DataMemory({ c, sim }: { c: Cycle; sim: Simulation }) {
+  const addrs = [...new Set([...Object.keys(c.memory), ...Object.keys(sim.final.memory)].map(Number))].sort((a, b) => a - b)
+  return <div>
+    <div className="pl-head"><h2>Data memory</h2><span className="muted">A store is written at the end of its MEM cycle.</span></div>
+    {addrs.length ? <table className="pl-memory"><thead><tr><th>Address</th><th>Value</th></tr></thead>
+      <tbody>{addrs.map((a) => <tr key={a} className={c.mem?.address === a ? (c.mem.write ? 'writing' : 'reading') : ''}><td>{a}</td><td>{c.memory[a] ?? 0}{c.mem?.address === a && c.mem.write ? ` → ${c.at.exmem!.writeData} at edge` : ''}</td></tr>)}</tbody>
+    </table> : <p className="muted">No memory words used.</p>}
+  </div>
+}
+
 // ---------- multi-cycle (timing) diagram ----------
 
 /** One row per dynamic instance (seq): a loop body fetched twice gets two rows; a stall bubble gets its own row. */
-type Cell = { stage: string; repeat?: boolean; gone?: boolean; kill?: boolean }
-type ChartRow = { seq: number; instr: Instr; bubble: boolean; gone?: Squash; cells: Map<number, Cell>; order: number }
-function TimingChart({ sim, cycle, onSeek }: { sim: Simulation; cycle: number; onSeek: (k: number) => void }) {
+export type Cell = { stage: string; repeat?: boolean; gone?: boolean; kill?: boolean }
+export type ChartRow = { seq: number; instr: Instr; bubble: boolean; gone?: Squash; cells: Map<number, Cell>; order: number }
+export function chartRows(sim: Simulation): ChartRow[] {
   const rows = new Map<number, ChartRow>()
   const put = (seq: number, instr: Instr, n: number, cell: Cell, bubble = false, gone?: Squash) => {
     if (!rows.has(seq)) rows.set(seq, { seq, instr, bubble, gone, cells: new Map(), order: Infinity })
@@ -291,7 +313,11 @@ function TimingChart({ sim, cycle, onSeek }: { sim: Simulation; cycle: number; o
       put(p.seq, p.squashed?.instr ?? p.instr, c.n, { stage, gone: !!p.squashed, kill }, stallBubble, p.squashed)
     }
   })
-  const ordered = [...rows.values()].sort((a, b) => a.order - b.order || a.seq - b.seq)
+  return [...rows.values()].sort((a, b) => a.order - b.order || a.seq - b.seq)
+}
+
+function TimingChart({ sim, cycle, onSeek }: { sim: Simulation; cycle: number; onSeek: (k: number) => void }) {
+  const ordered = chartRows(sim)
   const LW = 250, CW = 62, RH = 36, TOP = 30
   const N = sim.cycles.length
   const rowIndex = new Map(ordered.map((r, k) => [r.seq, k]))
@@ -463,7 +489,7 @@ function LineView({ line }: { line: Line }) {
     <Md text={line.text} />
     {line.checks && <div className="pl-checks">
       {line.checks.map((c, i) => <span key={i} className={c.ok ? 'ok' : 'no'}>{c.ok ? '✔' : '✘'} {c.text}</span>)}
-      {line.result && <span className={`res ${line.result === 'false' || line.result === 'no stall' ? 'no' : 'ok'}`}>⇒ {line.result}</span>}
+      {line.result && <span className={`res ${line.result === 'false' || line.result === 'no stall' ? 'no' : 'ok'} ${resultTone(line.result) ?? ''}`}>⇒ {line.result}</span>}
     </div>}
   </li>
 }
@@ -478,7 +504,7 @@ const PANELS = [
 type PanelId = (typeof PANELS)[number]['id']
 
 /** Per-viewer preferences; storage can be missing (private mode), so every access is guarded. */
-function usePref<T>(key: string, initial: T): [T, (v: T) => void] {
+export function usePref<T>(key: string, initial: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(() => {
     try { const s = localStorage.getItem(key); return s ? (JSON.parse(s) as T) : initial } catch { return initial }
   })
@@ -486,12 +512,12 @@ function usePref<T>(key: string, initial: T): [T, (v: T) => void] {
   return [v, set]
 }
 
-function run(input: { code: string; registers: string; memory: string }, branches: boolean, hw: Hardware) {
+export function run(input: { code: string; registers: string; memory: string }, branches: boolean, hw: Hardware) {
   const init = parseInitial(input.registers, input.memory)
   return simulate(parseProgram(input.code, { branches }), init.regs, init.memory, branches ? hw : {})
 }
 
-function PipelineLab({ lesson }: { lesson: Lesson }) {
+export function PipelineLab({ lesson }: { lesson: Lesson }) {
   const EX = lesson.examples
   const first = EX[lesson.initial]
   const [example, setExample] = useState(lesson.initial)
@@ -563,7 +589,6 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
   }
   const togglePanel = (id: PanelId) => setPanels(panels.includes(id) ? panels.filter((p) => p !== id) : [...panels, id])
 
-  const memAddrs = [...new Set([...Object.keys(c.memory), ...Object.keys(sim.final.memory)].map(Number))].sort((a, b) => a - b)
   const groups = [...new Set(EX.map((e) => e.group))]
   const switchMode = (m: ViewMode) => {
     if (m === mode) return
@@ -572,8 +597,6 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
   }
   const whole = mode === 'whole'
   const atEdge = step.phase === 'edge' || step.phase === 'all'
-  const regsShown = step.phase === 'edge' ? c.regs : c.regsMid
-  const wbReg = c.wb?.writes && step.phase !== 'edge' ? c.wb.rd : -1
   const current = example >= 0 ? EX[example] : null
   const forwards = sim.cycles.reduce((n, x) => {
     const e = real(x.at.idex)
@@ -741,25 +764,15 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
     </section>}
 
     {panels.includes('state') && <section className="pl-panel pl-state">
-      <div>
-        <div className="pl-head"><h2>Register file</h2><span className="muted">{step.phase === 'edge' ? 'At the start of the cycle.' : 'After the first-half write.'} Hover for hex.</span></div>
-        <div className="pl-regs">{NAMES.map((n, r) => <div key={n} className={r === wbReg ? 'written' : ''} title={hex(regsShown[r])}>
-          <span>{regName(r)} <small>{regName(r) === `$${n}` ? r : n}</small></span><b>{r === wbReg && c.wb ? <><s>{c.wb.old}</s> {regsShown[r]}</> : regsShown[r]}</b>
-        </div>)}</div>
-      </div>
-      <div>
-        <div className="pl-head"><h2>Data memory</h2><span className="muted">A store is written at the end of its MEM cycle.</span></div>
-        {memAddrs.length ? <table className="pl-memory"><thead><tr><th>Address</th><th>Value</th></tr></thead>
-          <tbody>{memAddrs.map((a) => <tr key={a} className={c.mem?.address === a ? (c.mem.write ? 'writing' : 'reading') : ''}><td>{a}</td><td>{c.memory[a] ?? 0}{c.mem?.address === a && c.mem.write ? ` → ${c.at.exmem!.writeData} at edge` : ''}</td></tr>)}</tbody>
-        </table> : <p className="muted">No memory words used.</p>}
-      </div>
+      <RegisterFile c={c} phase={step.phase} />
+      <DataMemory c={c} sim={sim} />
     </section>}
 
     {panels.includes('rules') && (lesson.branches ? <BranchRules /> : <DataRules />)}
   </main>
 }
 
-const FORWARD_RULES = `EX hazard:
+export const FORWARD_RULES = `EX hazard:
 if (EX/MEM.RegWrite and (EX/MEM.RegisterRd ≠ 0)
     and (EX/MEM.RegisterRd = ID/EX.RegisterRs))  ForwardA = 10
 if (EX/MEM.RegWrite and (EX/MEM.RegisterRd ≠ 0)
@@ -771,12 +784,12 @@ if (MEM/WB.RegWrite and (MEM/WB.RegisterRd ≠ 0)
              and (EX/MEM.RegisterRd = ID/EX.RegisterRs))
     and (MEM/WB.RegisterRd = ID/EX.RegisterRs))  ForwardA = 01
 (same for Rt → ForwardB = 01)`
-const LOAD_USE_RULE = `if (ID/EX.MemRead and
+export const LOAD_USE_RULE = `if (ID/EX.MemRead and
     ((ID/EX.RegisterRt = IF/ID.RegisterRs) or
      (ID/EX.RegisterRt = IF/ID.RegisterRt)))
   stall the pipeline`
 
-function DataRules() {
+export function DataRules() {
   return <section className="pl-panel eqs pl-rules">
     <div>
       <h3>Forwarding unit (EX) · slides 61 and 64</h3>
