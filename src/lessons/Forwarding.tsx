@@ -117,8 +117,8 @@ const PRESETS: { group: string; name: string; from: string; code: string }[] = [
 
 // ---------- drawing ----------
 const LW = 230, CW = 58, RH = 38, TOP = 30
-const STAGE_FILL: Record<string, string> = { IF: '#e9f0fb', ID: '#e7f5ea', EX: '#fff0e5', MEM: '#f1ecfa', WB: '#efefef' }
-const VIA_COLOR: Record<Via, string> = { exmem: '#e8590c', memwb: '#7048e8', regfile: '#8a877f' }
+const STAGE_FILL: Record<string, string> = { IF: 'var(--stage-if-bg)', ID: 'var(--stage-id-bg)', EX: 'var(--stage-ex-bg)', MEM: 'var(--stage-mem-bg)', WB: 'var(--stage-wb-bg)' }
+const VIA_COLOR: Record<Via, string> = { exmem: 'var(--fwd-exmem)', memwb: 'var(--fwd-memwb)', regfile: 'var(--ink-faint)' }
 const fwdName = (f: Field) => (f === 'Rs' ? 'ForwardA' : 'ForwardB')
 
 type Row = { kind: 'ins'; i: number } | { kind: 'bubble'; ex: number }
@@ -150,10 +150,10 @@ export function Forwarding() {
   const cell = (key: string, c: number, r: number, label: string, mode: 'normal' | 'stall' | 'bubble') => (
     <g key={key}>
       <rect x={cx(c) + 3} y={ry(r) + 4} width={CW - 6} height={RH - 8} rx={6}
-        fill={mode === 'bubble' ? '#fff' : mode === 'stall' ? 'url(#hatch)' : STAGE_FILL[label]}
-        stroke={mode === 'bubble' ? '#b9b5aa' : '#c9c5ba'} strokeDasharray={mode === 'bubble' ? '4 3' : undefined} />
+        fill={mode === 'bubble' ? 'var(--card)' : mode === 'stall' ? 'url(#hatch)' : STAGE_FILL[label]}
+        stroke={mode === 'bubble' ? 'var(--bubble-border)' : 'var(--stage-border)'} strokeDasharray={mode === 'bubble' ? '4 3' : undefined} />
       <text x={cx(c) + CW / 2} y={ry(r) + RH / 2 + 5} textAnchor="middle" fontSize={14}
-        fill={mode === 'normal' ? '#1d1b16' : '#8a877f'} fontWeight={mode === 'normal' ? 600 : 400}>{mode === 'bubble' ? 'nop' : label}</text>
+        fill={mode === 'normal' ? 'var(--ink)' : 'var(--ink-faint)'} fontWeight={mode === 'normal' ? 600 : 400}>{mode === 'bubble' ? 'nop' : label}</text>
     </g>
   )
 
@@ -198,7 +198,7 @@ export function Forwarding() {
               <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Pipeline diagram">
                 <defs>
                   <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                    <rect width="6" height="6" fill="#f6f5f1" /><line x1="0" y1="0" x2="0" y2="6" stroke="#d6d2c7" strokeWidth="3" />
+                    <rect width="6" height="6" fill="var(--bg)" /><line x1="0" y1="0" x2="0" y2="6" stroke="var(--stall-hatch)" strokeWidth="3" />
                   </pattern>
                   {(Object.keys(VIA_COLOR) as Via[]).map((v) => (
                     <marker key={v} id={`ah-${v}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -207,19 +207,19 @@ export function Forwarding() {
                   ))}
                 </defs>
                 {Array.from({ length: s.total }, (_, k) => (
-                  <text key={k} x={cx(k + 1) + CW / 2} y={18} textAnchor="middle" fontSize={13} fill="#6a665c">CC{k + 1}</text>
+                  <text key={k} x={cx(k + 1) + CW / 2} y={18} textAnchor="middle" fontSize={13} fill="var(--muted)">CC{k + 1}</text>
                 ))}
                 {rows.map((row, r) => {
                   if (row.kind === 'bubble') {
                     return (
                       <g key={`b${r}`}>
-                        <text x={8} y={ry(r) + RH / 2 + 5} fontSize={13} fill="#8a877f" fontStyle="italic">bubble</text>
+                        <text x={8} y={ry(r) + RH / 2 + 5} fontSize={13} fill="var(--ink-faint)" fontStyle="italic">bubble</text>
                         {['EX', 'MEM', 'WB'].map((st, k) => cell(`b${r}${k}`, row.ex + k, r, st, 'bubble'))}
                       </g>
                     )
                   }
                   const i = row.i
-                  const out = [<text key="t" x={8} y={ry(r) + RH / 2 + 5} fontSize={14} fontFamily="Consolas, monospace" fill="#1d1b16">{ins[i].text}</text>]
+                  const out = [<text key="t" x={8} y={ry(r) + RH / 2 + 5} fontSize={14} fontFamily="Consolas, monospace" fill="var(--ink)">{ins[i].text}</text>]
                   for (let c = s.f[i]; c < s.id[i]; c++) out.push(cell(`f${c}`, c, r, 'IF', c === s.f[i] ? 'normal' : 'stall'))
                   for (let c = s.id[i]; c < s.ex[i]; c++) out.push(cell(`d${c}`, c, r, 'ID', c === s.id[i] ? 'normal' : 'stall'))
                   ;['EX', 'MEM', 'WB'].forEach((st, k) => out.push(cell(st, s.ex[i] + k, r, st, 'normal')))
@@ -245,7 +245,7 @@ export function Forwarding() {
                     const x = cx(s.ex[d.i]), ro = rowOf(d.older!)
                     return <g opacity={on ? 0.75 : 0.2}>
                       <polyline points={`${x - CW * 0.3},${ry(ro) + RH - 6} ${x + CW * 0.2},${ry(ri) + 5}`} fill="none" stroke={VIA_COLOR.memwb} strokeWidth={1.6} strokeDasharray="3 3" />
-                      <text x={x - CW * 0.05} y={(ry(ro) + RH + ry(ri)) / 2 + 6} textAnchor="middle" fontSize={17} fill={VIA_COLOR.memwb} fontWeight={700} stroke="#fff" strokeWidth={3} paintOrder="stroke">✗</text>
+                      <text x={x - CW * 0.05} y={(ry(ro) + RH + ry(ri)) / 2 + 6} textAnchor="middle" fontSize={17} fill={VIA_COLOR.memwb} fontWeight={700} stroke="var(--card)" strokeWidth={3} paintOrder="stroke">✗</text>
                     </g>
                   })()
                   return (
@@ -261,7 +261,7 @@ export function Forwarding() {
             <span><i style={{ background: VIA_COLOR.exmem }} />from EX/MEM (Forward = 10)</span>
             <span><i style={{ background: VIA_COLOR.memwb }} />from MEM/WB (Forward = 01)</span>
             <span><i style={{ background: VIA_COLOR.regfile }} />register file: write 1st half, read 2nd half</span>
-            <span><i style={{ background: '#d6d2c7' }} />stalled (stage repeats)</span>
+            <span><i style={{ background: 'var(--stall-hatch)' }} />stalled (stage repeats)</span>
             {s.deps.some((d) => d.older !== undefined) && <span style={{ color: VIA_COLOR.memwb }}>✗ older MEM/WB value, ignored</span>}
           </div>
 

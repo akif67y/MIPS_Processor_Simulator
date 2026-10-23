@@ -5,7 +5,7 @@ import './pipeline.css'
 // Slides 82–85: dynamic prediction with a branch history table, the 1-bit predictor's
 // shortcoming on nested loops, the 2-bit predictor, and the branch target buffer.
 
-const GREEN = '#2b8a3e', RED = '#e03131', INK = '#212529', MUTED = '#adb5bd', CTRL = '#24519e'
+const GREEN = 'var(--branch)', RED = 'var(--hazard)', INK = 'var(--ink-strong)', MUTED = 'var(--gray-400)', CTRL = 'var(--wire-ctrl)'
 
 /** The state machines of slides 83–84, drawn as on slide 84 (strong states on the left). */
 function StateDiagram({ scheme, state, from, taken }: { scheme: Scheme; state: number; from: number | null; taken: boolean | null }) {
@@ -13,7 +13,7 @@ function StateDiagram({ scheme, state, from, taken }: { scheme: Scheme; state: n
   const pos1: Record<number, [number, number]> = { 1: [110, 60], 0: [110, 210] }
   const pos = scheme === '2bit' ? pos2 : pos1
   const n = scheme === '2bit' ? 4 : 2
-  const fill = (s: number) => (s === state ? (s >= n / 2 ? '#d3f9d8' : '#ffe3e3') : '#f8f9fa')
+  const fill = (s: number) => (s === state ? (s >= n / 2 ? 'var(--predict-taken-bg)' : 'var(--predict-wrong-bg)') : 'var(--gray-50)')
   // Transitions: [from, to, outcome, path, label position]
   type Tr = { a: number; b: number; t: boolean; d: string; lx: number; ly: number }
   const T2: Tr[] = [
@@ -43,7 +43,7 @@ function StateDiagram({ scheme, state, from, taken }: { scheme: Scheme; state: n
       const c = hot ? (t.t ? GREEN : RED) : CTRL
       return <g key={i}>
         <path d={t.d} fill="none" stroke={c} strokeWidth={hot ? 4 : 1.6} markerEnd={`url(#bp-${scheme}-${hot ? (t.t ? 'g' : 'r') : 'n'})`} />
-        <text x={t.lx} y={t.ly} textAnchor="middle" fontSize={13} fill={hot ? c : '#495057'} fontWeight={hot ? 700 : 400}>{t.t ? 'Taken' : 'Not taken'}</text>
+        <text x={t.lx} y={t.ly} textAnchor="middle" fontSize={13} fill={hot ? c : 'var(--gray-700)'} fontWeight={hot ? 700 : 400}>{t.t ? 'Taken' : 'Not taken'}</text>
       </g>
     })}
     {Object.entries(pos).map(([s, [cx, cy]]) => {
@@ -51,8 +51,8 @@ function StateDiagram({ scheme, state, from, taken }: { scheme: Scheme; state: n
       const on = k === state
       return <g key={s}>
         <ellipse cx={cx} cy={cy} rx={90} ry={32} fill={fill(k)} stroke={on ? INK : MUTED} strokeWidth={on ? 3.5 : 1.5} />
-        <text x={cx} y={cy - 2} textAnchor="middle" fontSize={14} fontWeight={700} fill={on ? INK : '#495057'}>{k >= n / 2 ? 'Predict taken' : 'Predict not taken'}</text>
-        <text x={cx} y={cy + 16} textAnchor="middle" fontSize={12} fill="#495057">{scheme === '2bit' ? `${['strong', 'weak', 'weak', 'strong'][k]} · ${k.toString(2).padStart(2, '0')}` : `bit = ${k}`}</text>
+        <text x={cx} y={cy - 2} textAnchor="middle" fontSize={14} fontWeight={700} fill={on ? INK : 'var(--gray-700)'}>{k >= n / 2 ? 'Predict taken' : 'Predict not taken'}</text>
+        <text x={cx} y={cy + 16} textAnchor="middle" fontSize={12} fill="var(--gray-700)">{scheme === '2bit' ? `${['strong', 'weak', 'weak', 'strong'][k]} · ${k.toString(2).padStart(2, '0')}` : `bit = ${k}`}</text>
       </g>
     })}
   </svg>

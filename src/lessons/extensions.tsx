@@ -41,8 +41,8 @@ export const JR: ExtensionSpec = {
       <MuxN x={1452} y={150} w={38} h={140} look="added" inputs={[{ t: '0', y: 180 }, { t: '1', y: 265 }]} />
       <Wire look="chosen" pts={[[1490, 220], [1505, 220], [1505, 14], [27, 14], [27, 643], [52, 643]]} />
       <Wire look="chosen" kind="ctrl" arrow={false} pts={[[1471, 322], [1471, 290]]} />
-      <text x={1471} y={344} fontSize={19} fontWeight={700} fontFamily="Arial" textAnchor="middle" fill="#2f9e44" stroke="white" strokeWidth={5} paintOrder="stroke">JumpReg</text>
-      <text x={1180} y={606} fontSize={19} fontFamily="Arial" fill="#e8590c" stroke="white" strokeWidth={5} paintOrder="stroke">Read data 1 = Reg[rs]</text>
+      <text x={1471} y={344} fontSize={19} fontWeight={700} fontFamily="Arial" textAnchor="middle" fill="var(--hw-added)" stroke="white" strokeWidth={5} paintOrder="stroke">JumpReg</text>
+      <text x={1180} y={606} fontSize={19} fontFamily="Arial" fill="var(--path-chosen)" stroke="white" strokeWidth={5} paintOrder="stroke">Read data 1 = Reg[rs]</text>
     </g>
   ),
   steps: [
@@ -88,7 +88,7 @@ export const JAL: ExtensionSpec = {
       {/* Write-data mux widened: input 2 = PC + 4 */}
       <MemtoReg3 input2="" />
       <Wire look="chosen" pts={[[1375, 900], [1397, 900]]} />
-      <text x={1394} y={890} fontSize={17} fontWeight={700} fontFamily="Arial" textAnchor="end" fill="#e8590c" stroke="white" strokeWidth={5} paintOrder="stroke">PC+4</text>
+      <text x={1394} y={890} fontSize={17} fontWeight={700} fontFamily="Arial" textAnchor="end" fill="var(--path-chosen)" stroke="white" strokeWidth={5} paintOrder="stroke">PC+4</text>
       <Label x={1428} y={425} look="added" kind="ctrl" size={18}>MemtoReg (2 bits)</Label>
     </g>
   ),

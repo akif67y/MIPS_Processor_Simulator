@@ -21,20 +21,21 @@ import type { ReactNode } from 'react'
  *  flush    – flush signals and flushed instructions */
 export type Look = 'normal' | 'chosen' | 'computed' | 'faded' | 'added' | 'hidden' | 'exmem' | 'memwb' | 'hazard' | 'rf' | 'branch' | 'flush'
 
+/** Colours per look; the values live in src/tokens.css. */
 export const COLORS = {
-  data: '#111111',
-  ctrl: '#24519e',
-  faded: '#cdcdcd',
-  fadedText: '#b9b9b9',
-  chosen: '#e8590c',
-  computed: '#8f7cc8',
-  added: '#2f9e44',
-  exmem: '#e8590c',
-  memwb: '#7048e8',
-  hazard: '#e03131',
-  rf: '#0c8599',
-  branch: '#2b8a3e',
-  flush: '#d6336c',
+  data: 'var(--wire-data)',
+  ctrl: 'var(--wire-ctrl)',
+  faded: 'var(--wire-faded)',
+  fadedText: 'var(--wire-faded-text)',
+  chosen: 'var(--path-chosen)',
+  computed: 'var(--path-computed)',
+  added: 'var(--hw-added)',
+  exmem: 'var(--fwd-exmem)',
+  memwb: 'var(--fwd-memwb)',
+  hazard: 'var(--hazard)',
+  rf: 'var(--regfile)',
+  branch: 'var(--branch)',
+  flush: 'var(--flush)',
 }
 
 /** Looks drawn with a heavier stroke because they are the point of the picture. */

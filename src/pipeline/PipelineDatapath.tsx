@@ -77,7 +77,7 @@ function ctrlBits(c: Controls, part: 'WB' | 'M' | 'EX', op?: Instr['op'], branch
 }
 
 /** Small value tag (monospace, white box) placed over the diagram. */
-function Tag({ x, y, text, color = '#212529', anchor = 'middle' }: { x: number; y: number; text: string; color?: string; anchor?: 'start' | 'middle' | 'end' }) {
+function Tag({ x, y, text, color = 'var(--ink-strong)', anchor = 'middle' }: { x: number; y: number; text: string; color?: string; anchor?: 'start' | 'middle' | 'end' }) {
   const w = text.length * 11.1 + 16
   const left = anchor === 'start' ? x : anchor === 'middle' ? x - w / 2 : x - w
   return (
@@ -335,25 +335,25 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
     const r = REG[key]
     const x = X(r.x)
     const gone = p?.squashed
-    const color = p ? (gone ? COLORS.flush : p.bubble ? '#868e96' : instrColor(p.instr)) : '#adb5bd'
+    const color = p ? (gone ? COLORS.flush : p.bubble ? 'var(--gray-500)' : instrColor(p.instr)) : 'var(--gray-400)'
     const dataTop = r.top + parts.length * 40
     const label = p ? (gone ? goneText(gone) : p.bubble ? 'bubble · controls = 0' : p.instr.text) : 'empty'
     const mid = (dataTop + BOTTOM) / 2
     return (
       <g key={key} opacity={op(BAR_GROUPS[key])}>
-        <rect x={x} y={dataTop} width={r.w} height={BOTTOM - dataTop} fill={p ? (gone ? 'url(#pl-flush)' : p.bubble ? 'url(#pl-hatch)' : tint(color, '22')) : '#f8f9fa'}
-          stroke={hold ? COLORS.hazard : '#343a40'} strokeWidth={hold ? 5 : 2.4} />
+        <rect x={x} y={dataTop} width={r.w} height={BOTTOM - dataTop} fill={p ? (gone ? 'url(#pl-flush)' : p.bubble ? 'url(#pl-hatch)' : tint(color, '22')) : 'var(--gray-50)'}
+          stroke={hold ? COLORS.hazard : 'var(--gray-800)'} strokeWidth={hold ? 5 : 2.4} />
         {parts.map((part, i) => (
           <g key={part}>
-            <rect x={x} y={r.top + i * 40} width={r.w} height={40} fill={p ? 'white' : '#f8f9fa'} stroke={COLORS.ctrl} strokeWidth={2.2} />
+            <rect x={x} y={r.top + i * 40} width={r.w} height={40} fill={p ? 'white' : 'var(--gray-50)'} stroke={COLORS.ctrl} strokeWidth={2.2} />
             <text x={x + r.w / 2} y={r.top + i * 40 + 16} fontFamily={FONT} fontSize={14} fill={COLORS.ctrl} textAnchor="middle">{part}</text>
             {ctrl && values && <text x={x + r.w / 2} y={r.top + i * 40 + 34} fontFamily={MONO} fontSize={part === 'M' && BR === 'mem' ? 13 : 15} fontWeight={700} fill={p?.bubble ? (gone ? COLORS.flush : COLORS.hazard) : COLORS.ctrl} textAnchor="middle">{ctrlBits(ctrl, part, p?.bubble ? undefined : p?.instr.op, BR === 'mem')}</text>}
           </g>
         ))}
         <text x={x + r.w / 2 + 7} y={mid} transform={`rotate(-90 ${x + r.w / 2 + 7} ${mid})`} textAnchor="middle"
-          fontFamily={MONO} fontSize={22} fontWeight={700} fill={p ? color : '#adb5bd'}
+          fontFamily={MONO} fontSize={22} fontWeight={700} fill={p ? color : 'var(--gray-400)'}
           textLength={label.length * 12.2 > BOTTOM - dataTop - 20 ? BOTTOM - dataTop - 20 : undefined} lengthAdjust="spacingAndGlyphs">{label}</text>
-        <text x={x + r.w / 2} y={r.top - 12} fontFamily={FONT} fontSize={22} fontWeight={700} textAnchor="middle" fill="#212529">{r.name}</text>
+        <text x={x + r.w / 2} y={r.top - 12} fontFamily={FONT} fontSize={22} fontWeight={700} textAnchor="middle" fill="var(--ink-strong)">{r.name}</text>
         {p && !p.bubble && !gone && <g>
           <circle cx={x + r.w / 2} cy={BOTTOM + 21} r={16} fill={color} />
           <text x={x + r.w / 2} y={BOTTOM + 27} textAnchor="middle" fontFamily={FONT} fontSize={16} fontWeight={700} fill="white">I{p.instr.id + 1}</text>
@@ -388,7 +388,7 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
   const toneColor = { hazard: COLORS.hazard, flush: COLORS.flush, branch: COLORS.branch }
 
   // Whole-cycle view: which stage a wire belongs to (its first group), and that stage's colour.
-  const pktColor = (p: { instr: Instr; bubble?: boolean; squashed?: Squash } | null | undefined) => (!p ? null : p.squashed ? COLORS.flush : p.bubble ? '#868e96' : instrColor(p.instr))
+  const pktColor = (p: { instr: Instr; bubble?: boolean; squashed?: Squash } | null | undefined) => (!p ? null : p.squashed ? COLORS.flush : p.bubble ? 'var(--gray-500)' : instrColor(p.instr))
   const stageColor: Record<'IF' | 'ID' | 'EX' | 'MEM' | 'WB', string | null> = {
     IF: F ? instrColor(F) : null, ID: pktColor(ifid), EX: pktColor(idex), MEM: pktColor(exmem), WB: pktColor(memwb),
   }
@@ -411,12 +411,12 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
       aria-label={`Pipelined datapath with forwarding and hazard detection${BR ? `, branch decided in ${BR.toUpperCase()}` : ''}, clock cycle ${c.n}`}>
       <defs>
         <pattern id="pl-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="10" height="10" fill="#f1f3f5" />
-          <line x1="0" y1="0" x2="0" y2="10" stroke="#ced4da" strokeWidth="5" />
+          <rect width="10" height="10" fill="var(--gray-100)" />
+          <line x1="0" y1="0" x2="0" y2="10" stroke="var(--gray-350)" strokeWidth="5" />
         </pattern>
         <pattern id="pl-flush" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-          <rect width="10" height="10" fill="#fff0f6" />
-          <line x1="0" y1="0" x2="0" y2="10" stroke="#fcc2d7" strokeWidth="5" />
+          <rect width="10" height="10" fill="var(--tag-flush-bg)" />
+          <line x1="0" y1="0" x2="0" y2="10" stroke="var(--flush-hatch)" strokeWidth="5" />
         </pattern>
       </defs>
       <rect x={-LEFT} y={-TOP} width={vbW} height={H + TOP} fill="white" />
@@ -424,20 +424,20 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
 
       {stages.map((s) => {
         const y0 = 8 - TOP
-        const color = s.gone ? COLORS.flush : s.who && !s.bubble ? instrColor(s.who) : '#868e96'
+        const color = s.gone ? COLORS.flush : s.who && !s.bubble ? instrColor(s.who) : 'var(--gray-500)'
         const text = s.who ? (s.gone ? goneText(s.gone) : s.bubble ? 'bubble (nop)' : s.who.text) : '(empty)'
         const room = s.x1 - s.x0 - 32
         return (
           <g key={s.name}>
-            <rect x={s.x0} y={y0} width={s.x1 - s.x0} height={76} rx={10} fill={s.who ? (s.gone ? 'url(#pl-flush)' : s.bubble ? 'url(#pl-hatch)' : tint(color)) : '#f8f9fa'} stroke={s.who ? color : '#dee2e6'} strokeWidth={2} />
-            <rect x={s.x0} y={y0} width={10} height={76} rx={5} fill={s.who ? color : '#dee2e6'} />
-            <text x={s.x0 + 22} y={y0 + 29} fontFamily={FONT} fontSize={22} fontWeight={700} fill={s.who ? color : '#adb5bd'}>
+            <rect x={s.x0} y={y0} width={s.x1 - s.x0} height={76} rx={10} fill={s.who ? (s.gone ? 'url(#pl-flush)' : s.bubble ? 'url(#pl-hatch)' : tint(color)) : 'var(--gray-50)'} stroke={s.who ? color : 'var(--gray-300)'} strokeWidth={2} />
+            <rect x={s.x0} y={y0} width={10} height={76} rx={5} fill={s.who ? color : 'var(--gray-300)'} />
+            <text x={s.x0 + 22} y={y0 + 29} fontFamily={FONT} fontSize={22} fontWeight={700} fill={s.who ? color : 'var(--gray-400)'}>
               {s.name}{s.who && !s.bubble && !s.gone ? `  ·  I${s.who.id + 1}` : ''}
             </text>
-            <text x={s.x0 + 22} y={y0 + 61} fontFamily={MONO} fontSize={22} fontWeight={700} fill={s.who ? (s.bubble || s.gone ? '#495057' : '#212529') : '#adb5bd'}
+            <text x={s.x0 + 22} y={y0 + 61} fontFamily={MONO} fontSize={22} fontWeight={700} fill={s.who ? (s.bubble || s.gone ? 'var(--gray-700)' : 'var(--ink-strong)') : 'var(--gray-400)'}
               textLength={text.length * 12.2 > room ? room : undefined} lengthAdjust="spacingAndGlyphs">{text}</text>
-            {s.note && <text x={s.x1 - 12} y={y0 + 29} fontFamily={FONT} fontSize={17} textAnchor="end" fill={s.tone ? toneColor[s.tone] : '#495057'} fontWeight={s.tone ? 700 : 400}>{s.note}</text>}
-            {s.bubble && !s.gone && !s.note && s.x1 - s.x0 > 400 && <text x={s.x1 - 12} y={y0 + 29} fontFamily={FONT} fontSize={17} textAnchor="end" fill="#495057">all controls 0 · writes nothing</text>}
+            {s.note && <text x={s.x1 - 12} y={y0 + 29} fontFamily={FONT} fontSize={17} textAnchor="end" fill={s.tone ? toneColor[s.tone] : 'var(--gray-700)'} fontWeight={s.tone ? 700 : 400}>{s.note}</text>}
+            {s.bubble && !s.gone && !s.note && s.x1 - s.x0 > 400 && <text x={s.x1 - 12} y={y0 + 29} fontFamily={FONT} fontSize={17} textAnchor="end" fill="var(--gray-700)">all controls 0 · writes nothing</text>}
           </g>
         )
       })}
@@ -556,17 +556,17 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
         <Halo x={ifidWriteX - 8} y={137} anchor="end" color={stall ? COLORS.hazard : COLORS.ctrl} bold={stall}>{`IF/IDWrite${values && hz.checked ? ` = ${c.ifidWrite}` : ''}`}</Halo>
         <Halo x={940} y={212} color={asked ? COLORS.hazard : COLORS.ctrl} bold={asked}>{`Stall${values && hz.checked ? ` = ${+asked}` : ''}`}</Halo>
         <Halo x={X(1052)} y={108} size={16} anchor="end">{BR === 'id' ? 'ID/EX.MemRead, RegWrite' : 'ID/EX.MemRead'}</Halo>
-        <Halo x={X(1052)} y={134} size={16} anchor="end" color="#212529">{BR === 'id' ? 'ID/EX.RegisterRt, Rd, RegDst' : 'ID/EX.RegisterRt'}</Halo>
-        <Halo x={530} y={149} size={16} color="#212529">IF/ID.RegisterRs</Halo>
-        <Halo x={538} y={192} size={16} color="#212529">IF/ID.RegisterRt</Halo>
-        {BR === 'id' && <Halo x={X(1585)} y={62} size={16} anchor="end" color="#212529">EX/MEM.MemRead, RegisterRd (branch check, slides 80–81)</Halo>}
+        <Halo x={X(1052)} y={134} size={16} anchor="end" color="var(--ink-strong)">{BR === 'id' ? 'ID/EX.RegisterRt, Rd, RegDst' : 'ID/EX.RegisterRt'}</Halo>
+        <Halo x={530} y={149} size={16} color="var(--ink-strong)">IF/ID.RegisterRs</Halo>
+        <Halo x={538} y={192} size={16} color="var(--ink-strong)">IF/ID.RegisterRt</Halo>
+        {BR === 'id' && <Halo x={X(1585)} y={62} size={16} anchor="end" color="var(--ink-strong)">EX/MEM.MemRead, RegisterRd (branch check, slides 80–81)</Halo>}
       </g>
       <g opacity={op(['id'])}>
-        <Halo x={480} y={892} size={16} color="#212529">[15–0]</Halo>
-        <Halo x={790} y={935} size={17} color="#212529">{`IF/ID.RegisterRs${values && D ? ` = ${regName(D.rs)}` : ''}`}</Halo>
-        <Halo x={790} y={960} size={17} color="#212529">{`IF/ID.RegisterRt${values && D ? ` = ${regName(D.rt)}` : ''}`}</Halo>
-        <Halo x={790} y={995} size={17} color="#212529">{`IF/ID.RegisterRd${values && D ? ` = ${regName(D.rd)}` : ''}`}</Halo>
-        <Halo x={896} y={422} size={17} color="#212529">PC + 4</Halo>
+        <Halo x={480} y={892} size={16} color="var(--ink-strong)">[15–0]</Halo>
+        <Halo x={790} y={935} size={17} color="var(--ink-strong)">{`IF/ID.RegisterRs${values && D ? ` = ${regName(D.rs)}` : ''}`}</Halo>
+        <Halo x={790} y={960} size={17} color="var(--ink-strong)">{`IF/ID.RegisterRt${values && D ? ` = ${regName(D.rt)}` : ''}`}</Halo>
+        <Halo x={790} y={995} size={17} color="var(--ink-strong)">{`IF/ID.RegisterRd${values && D ? ` = ${regName(D.rd)}` : ''}`}</Halo>
+        <Halo x={896} y={422} size={17} color="var(--ink-strong)">PC + 4</Halo>
       </g>
       <g opacity={op(['ex', 'fu'])} transform={sh(1160)}>
         <Halo x={1280} y={706} size={17} anchor="end">ALUSrc</Halo>
@@ -575,11 +575,11 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
         <Halo x={1212} y={1050} size={18} bold={fa !== '00'} color={E && fa !== '00' ? COLORS[fwdLook(fa) as 'exmem'] : COLORS.ctrl}>{`ForwardA${values && E ? ` = ${fa}` : ''}`}</Halo>
         <Halo x={1157} y={1064} size={17} anchor="end" bold={fb !== '00'} color={E && fb !== '00' ? COLORS[fwdLook(fb) as 'exmem'] : COLORS.ctrl}>{`ForwardB${values && E ? ` = ${fb}` : ''}`}</Halo>
         <Halo x={1440} y={1074} size={16}>EX/MEM.RegWrite</Halo>
-        <Halo x={1440} y={1099} size={16} color="#212529">EX/MEM.RegisterRd</Halo>
+        <Halo x={1440} y={1099} size={16} color="var(--ink-strong)">EX/MEM.RegisterRd</Halo>
         <Halo x={1440} y={1124} size={16}>MEM/WB.RegWrite</Halo>
-        <Halo x={1400} y={1189} size={16} color="#212529">MEM/WB.RegisterRd</Halo>
-        <Halo x={1160} y={1216} size={16} color={(any10 && showFwd) || busCmp ? COLORS.exmem : '#868e96'}>{BR === 'id' ? 'EX/MEM.ALUResult → 10 and → comparator' : 'EX/MEM.ALUResult → 10'}</Halo>
-        <Halo x={1160} y={1272} size={16} color={any01 && showFwd ? COLORS.memwb : '#868e96'}>MEM/WB value → 01</Halo>
+        <Halo x={1400} y={1189} size={16} color="var(--ink-strong)">MEM/WB.RegisterRd</Halo>
+        <Halo x={1160} y={1216} size={16} color={(any10 && showFwd) || busCmp ? COLORS.exmem : 'var(--gray-500)'}>{BR === 'id' ? 'EX/MEM.ALUResult → 10 and → comparator' : 'EX/MEM.ALUResult → 10'}</Halo>
+        <Halo x={1160} y={1272} size={16} color={any01 && showFwd ? COLORS.memwb : 'var(--gray-500)'}>MEM/WB value → 01</Halo>
       </g>
       <g opacity={op(['mem'])} transform={sh(1740)}>
         <Halo x={1733} y={470} rotate size={17} anchor="middle">MemWrite</Halo>
@@ -591,39 +591,39 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
       </g>
       {BR && <g opacity={op(['br', 'pc'])}>
         <Halo x={-100} y={PCSRC_Y - 8} size={17} color={c.pcSrc ? COLORS.branch : COLORS.ctrl} bold={!!c.pcSrc}>{`PCSrc${values && (b || c.waiting) ? ` = ${c.pcSrc}` : ''}`}</Halo>
-        <Halo x={-180} y={TARGET_Y - 8} size={17} color={taken ? COLORS.branch : '#212529'} bold={taken}>{`Branch target${values && b ? ` = ${b.target}` : ''}`}</Halo>
+        <Halo x={-180} y={TARGET_Y - 8} size={17} color={taken ? COLORS.branch : 'var(--ink-strong)'} bold={taken}>{`Branch target${values && b ? ` = ${b.target}` : ''}`}</Halo>
         <Halo x={438} y={PCSRC_Y + 50} size={17} color={ifFlush ? COLORS.flush : COLORS.ctrl} bold={ifFlush}>{`IF.Flush${values && (b || c.waiting) ? ` = ${+ifFlush}` : ''}`}</Halo>
         {BR === 'mem' && <>
           <Halo x={1028} y={PCSRC_Y + 50} size={17} color={flushing && c.at.ifid ? COLORS.flush : COLORS.ctrl} bold={flushing}>ID.Flush</Halo>
           <Halo x={X(1560) + 8} y={PCSRC_Y + 50} size={17} color={flushing && c.at.idex ? COLORS.flush : COLORS.ctrl} bold={flushing}>EX.Flush</Halo>
           <Halo x={1840} y={384 - 6} size={15} anchor="end">Branch</Halo>
-          <Halo x={1848} y={603} size={15} anchor="end" color="#212529">Zero</Halo>
-          <Halo x={X(1446)} y={603} size={15} color="#212529">Zero</Halo>
-          <Halo x={1215} y={452} size={15} color="#212529">target</Halo>
+          <Halo x={1848} y={603} size={15} anchor="end" color="var(--ink-strong)">Zero</Halo>
+          <Halo x={X(1446)} y={603} size={15} color="var(--ink-strong)">Zero</Halo>
+          <Halo x={1215} y={452} size={15} color="var(--ink-strong)">target</Halo>
         </>}
         {BR === 'id' && <>
           <Halo x={1218} y={392} size={15}>Branch</Halo>
-          <Halo x={1200} y={664} size={15} color="#212529">Equal</Halo>
+          <Halo x={1200} y={664} size={15} color="var(--ink-strong)">Equal</Halo>
           <Halo x={1040} y={442} size={14} anchor="middle" color={b?.fa?.sel ? COLORS.exmem : COLORS.ctrl}>{`ForwardC${values && b?.fa ? ` = ${b.fa.sel}` : ''}`}</Halo>
           <Halo x={1040} y={832} size={14} anchor="middle" color={b?.fb?.sel ? COLORS.exmem : COLORS.ctrl}>{`ForwardD${values && b?.fb ? ` = ${b.fb.sel}` : ''}`}</Halo>
         </>}
       </g>}
 
       {/* ---------- bubble markers (slide 71: "make all control fields 0") ---------- */}
-      {(idex?.bubble || idex?.squashed) && <g opacity={op(['ex'])}><Tag x={X(1290)} y={455} text={idex.squashed ? (idex.bubble ? 'flushed: EX, MEM, WB do nothing' : 'nop left by IF.Flush: does nothing') : 'bubble: EX, MEM, WB do nothing'} color={idex.squashed ? COLORS.flush : '#868e96'} /></g>}
-      {(exmem?.bubble || exmem?.squashed) && <g opacity={op(['mem'])}><Tag x={X(1775)} y={530} text={exmem.squashed ? 'flushed' : 'bubble'} color={exmem.squashed ? COLORS.flush : '#868e96'} /></g>}
-      {(memwb?.bubble || memwb?.squashed) && <g opacity={op(['wb'])}><Tag x={X(2010)} y={600} text={memwb.squashed ? 'flushed' : 'bubble'} color={memwb.squashed ? COLORS.flush : '#868e96'} /></g>}
+      {(idex?.bubble || idex?.squashed) && <g opacity={op(['ex'])}><Tag x={X(1290)} y={455} text={idex.squashed ? (idex.bubble ? 'flushed: EX, MEM, WB do nothing' : 'nop left by IF.Flush: does nothing') : 'bubble: EX, MEM, WB do nothing'} color={idex.squashed ? COLORS.flush : 'var(--gray-500)'} /></g>}
+      {(exmem?.bubble || exmem?.squashed) && <g opacity={op(['mem'])}><Tag x={X(1775)} y={530} text={exmem.squashed ? 'flushed' : 'bubble'} color={exmem.squashed ? COLORS.flush : 'var(--gray-500)'} /></g>}
+      {(memwb?.bubble || memwb?.squashed) && <g opacity={op(['wb'])}><Tag x={X(2010)} y={600} text={memwb.squashed ? 'flushed' : 'bubble'} color={memwb.squashed ? COLORS.flush : 'var(--gray-500)'} /></g>}
 
       {/* ---------- values ---------- */}
-      {show(['pc']) && <Tag x={90} y={732} text={`PC = ${c.at.pc}`} color={stall ? COLORS.hazard : '#212529'} />}
-      {BR && show(['pc', 'br']) && (b || c.waiting) && <Tag x={-100} y={760} text={`next PC = ${c.next.pc}`} color={c.pcSrc ? COLORS.branch : '#212529'} />}
+      {show(['pc']) && <Tag x={90} y={732} text={`PC = ${c.at.pc}`} color={stall ? COLORS.hazard : 'var(--ink-strong)'} />}
+      {BR && show(['pc', 'br']) && (b || c.waiting) && <Tag x={-100} y={760} text={`next PC = ${c.next.pc}`} color={c.pcSrc ? COLORS.branch : 'var(--ink-strong)'} />}
       {show(['if']) && F && <>
         <Tag x={270} y={795} text={hex(F.word)} />
         <Tag x={365} y={420} text={`${c.fetch.pc4}`} />
       </>}
       {show(['id']) && D && c.id && <>
-        <Tag x={940} y={530} text={`${regName(D.rs)} = ${c.id.data1}`} color={c.id.sameCycleRs ? COLORS.rf : '#212529'} />
-        <Tag x={940} y={705} text={`${regName(D.rt)} = ${c.id.data2}`} color={c.id.sameCycleRt ? COLORS.rf : '#212529'} />
+        <Tag x={940} y={530} text={`${regName(D.rs)} = ${c.id.data1}`} color={c.id.sameCycleRs ? COLORS.rf : 'var(--ink-strong)'} />
+        <Tag x={940} y={705} text={`${regName(D.rt)} = ${c.id.data2}`} color={c.id.sameCycleRt ? COLORS.rf : 'var(--ink-strong)'} />
         <Tag x={888} y={890} text={`${D.imm}`} />
         <Tag x={716} y={290} anchor="start" text={`${ctrlBits(c.id.ctrl, 'WB', D.op)} ${ctrlBits(c.id.ctrl, 'M', undefined, BR === 'mem')} ${ctrlBits(c.id.ctrl, 'EX', D.op)}`} color={COLORS.ctrl} />
       </>}
@@ -638,31 +638,31 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
       {showFwd && E && ex && ex.fa.double && <g opacity={op(['fu'])}><Tag x={X(1165)} y={494} text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
       {showFwd && E && ex && ex.fb.double && <g opacity={op(['fu'])}><Tag x={X(1094)} y={741} anchor="end" text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
       {show(['ex']) && E && ex && <g transform={sh(1300)}>
-        <Tag x={1248} y={563} text={`${ex.aluA}`} color={fa === '00' ? '#212529' : COLORS[fwdLook(fa) as 'exmem']} />
+        <Tag x={1248} y={563} text={`${ex.aluA}`} color={fa === '00' ? 'var(--ink-strong)' : COLORS[fwdLook(fa) as 'exmem']} />
         <Label x={1392} y={605} look="normal" anchor="middle" size={18}>{`A = ${ex.aluA}`}</Label>
         <Label x={1386} y={735} look="normal" anchor="middle" size={18}>{`B = ${ex.aluB}`}</Label>
         <Tag x={1492} y={638} text={`${ex.result}`} />
-        {E.ctrl.MemWrite ? <Tag x={1400} y={833} text={`${ex.writeData}`} color={fb === '00' ? '#212529' : COLORS[fwdLook(fb) as 'exmem']} /> : null}
+        {E.ctrl.MemWrite ? <Tag x={1400} y={833} text={`${ex.writeData}`} color={fb === '00' ? 'var(--ink-strong)' : COLORS[fwdLook(fb) as 'exmem']} /> : null}
         {E.ctrl.RegWrite ? <Tag x={1474} y={990} anchor="end" text={`dest ${regName(ex.regDst)}`} /> : null}
       </g>}
       {show(['ex', 'br']) && exBranch && ex && <>
         <Tag x={1160} y={380} text={`target ${ex.target}`} color={COLORS.branch} />
         <Tag x={X(1490)} y={598} text={`Zero = ${ex.zero}`} color={COLORS.branch} />
       </>}
-      {show(['br']) && BR === 'mem' && M?.ctrl.Branch ? <Tag x={1911} y={490} text={`PCSrc = ${c.pcSrc}`} color={taken ? COLORS.branch : '#212529'} /> : null}
+      {show(['br']) && BR === 'mem' && M?.ctrl.Branch ? <Tag x={1911} y={490} text={`PCSrc = ${c.pcSrc}`} color={taken ? COLORS.branch : 'var(--ink-strong)'} /> : null}
       {show(['br', 'id']) && BR === 'id' && idBranch && (idBranchWait
         ? <Tag x={CMP.cx} y={712} text="waits" color={COLORS.hazard} />
         : b && <>
-          <Tag x={1063} y={565} text={`${b.a}`} color={b.fa?.sel ? COLORS.exmem : '#212529'} />
-          <Tag x={1063} y={700} text={`${b.b}`} color={b.fb?.sel ? COLORS.exmem : '#212529'} />
-          <Tag x={1264} y={690} text={b.equal ? 'equal' : 'not equal'} color={b.equal ? COLORS.branch : '#212529'} />
-          <Tag x={1392} y={720} text={`${b.target}`} color={taken ? COLORS.branch : '#212529'} />
+          <Tag x={1063} y={565} text={`${b.a}`} color={b.fa?.sel ? COLORS.exmem : 'var(--ink-strong)'} />
+          <Tag x={1063} y={700} text={`${b.b}`} color={b.fb?.sel ? COLORS.exmem : 'var(--ink-strong)'} />
+          <Tag x={1264} y={690} text={b.equal ? 'equal' : 'not equal'} color={b.equal ? COLORS.branch : 'var(--ink-strong)'} />
+          <Tag x={1392} y={720} text={`${b.target}`} color={taken ? COLORS.branch : 'var(--ink-strong)'} />
         </>)}
       {show(['mem']) && M && c.mem && <g transform={sh(1775)}>
         <Label x={1775} y={784} look="normal" anchor="middle" size={18}>{`Mem[${c.mem.address}]`}</Label>
         <Label x={1775} y={807} look={c.mem.read ? 'normal' : 'exmem'} anchor="middle" size={18} bold>{c.mem.read ? `read ${c.mem.readData}` : `← ${M.writeData} at edge`}</Label>
       </g>}
-      {show(['wb']) && Wb && c.wb && Wb.ctrl.RegWrite ? <Tag x={X(2065)} y={1000} anchor="end" text={`${c.wb.value}`} color={phase === 'wb' ? COLORS.rf : '#212529'} /> : null}
+      {show(['wb']) && Wb && c.wb && Wb.ctrl.RegWrite ? <Tag x={X(2065)} y={1000} anchor="end" text={`${c.wb.value}`} color={phase === 'wb' ? COLORS.rf : 'var(--ink-strong)'} /> : null}
     </svg>
   )
 }

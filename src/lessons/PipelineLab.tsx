@@ -237,9 +237,9 @@ function Latch({ title, k, c, prev, edge, hw }: { title: string; k: 'pc' | 'ifid
   const bubble = !!pkt && 'bubble' in pkt && pkt.bubble
   const gone = pkt?.squashed
   const flushNext = c.squash && ((k === 'ifid' && c.squash.ifid) || (k === 'idex' && c.squash.idex) || (k === 'exmem' && c.squash.exmem))
-  const color = gone ? '#d6336c' : pkt && !bubble ? instrColor(pkt.instr) : '#868e96'
+  const color = gone ? 'var(--flush)' : pkt && !bubble ? instrColor(pkt.instr) : 'var(--gray-500)'
   const names = [...new Set([...now, ...next].map((r) => r[0]))]
-  return <article className={`pl-latch ${bubble ? 'bubble' : ''} ${gone ? 'gone' : ''} ${held ? 'held' : ''}`} style={{ borderTopColor: k === 'pc' ? '#343a40' : color }}>
+  return <article className={`pl-latch ${bubble ? 'bubble' : ''} ${gone ? 'gone' : ''} ${held ? 'held' : ''}`} style={{ borderTopColor: k === 'pc' ? 'var(--gray-800)' : color }}>
     <header>
       <h3>{title}</h3>
       {k !== 'pc' && <Chip i={pkt?.instr} bubble={bubble} gone={gone} />}
@@ -327,34 +327,34 @@ function TimingChart({ sim, cycle, onSeek }: { sim: Simulation; cycle: number; o
     const nextFetch = sim.cycles[k + 1]?.fetch
     if (b?.taken && nextFetch?.instr) arrows.push({ x1: x(c.n) + CW / 2, y1: rowY(b.seq) + RH - 4, x2: x(c.n + 1) + CW / 2, y2: rowY(nextFetch.seq) + 4, kind: 'br' })
   })
-  const color = { ex: '#e8590c', mem: '#7048e8', rf: '#0c8599', br: '#2b8a3e' }
+  const color = { ex: 'var(--fwd-exmem)', mem: 'var(--fwd-memwb)', rf: 'var(--regfile)', br: 'var(--branch)' }
   const W = LW + N * CW + 10, H = TOP + ordered.length * RH + 8
   return <div className="pl-chart-scroll">
     <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Multi-cycle pipeline diagram">
       <defs>
-        <pattern id="tc-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff5f5" /><line x1="0" y1="0" x2="0" y2="6" stroke="#ffc9c9" strokeWidth="3" /></pattern>
-        <pattern id="tc-flush" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><rect width="6" height="6" fill="#fff0f6" /><line x1="0" y1="0" x2="0" y2="6" stroke="#fcc2d7" strokeWidth="3" /></pattern>
+        <pattern id="tc-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--tag-hazard-bg)" /><line x1="0" y1="0" x2="0" y2="6" stroke="var(--hazard-hatch)" strokeWidth="3" /></pattern>
+        <pattern id="tc-flush" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><rect width="6" height="6" fill="var(--tag-flush-bg)" /><line x1="0" y1="0" x2="0" y2="6" stroke="var(--flush-hatch)" strokeWidth="3" /></pattern>
         {Object.entries(color).map(([k, v]) => <marker key={k} id={`tc-${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill={v} /></marker>)}
       </defs>
-      <rect x={x(now)} y={4} width={CW} height={H - 6} rx={6} fill="#fff4e6" stroke="#f59f00" strokeWidth={1.5} />
-      {sim.cycles.map((c) => <text key={c.n} x={x(c.n) + CW / 2} y={20} textAnchor="middle" fontSize={13} fontWeight={c.n === now ? 700 : 400} fill={c.n === now ? '#d9480f' : '#6a665c'}>CC{c.n}</text>)}
+      <rect x={x(now)} y={4} width={CW} height={H - 6} rx={6} fill="var(--now-fill)" stroke="var(--focus)" strokeWidth={1.5} />
+      {sim.cycles.map((c) => <text key={c.n} x={x(c.n) + CW / 2} y={20} textAnchor="middle" fontSize={13} fontWeight={c.n === now ? 700 : 400} fill={c.n === now ? 'var(--now-text)' : 'var(--muted)'}>CC{c.n}</text>)}
       {ordered.map((r, k) => {
         const loops = (seen.get(r.instr.id) ?? 0) > 1
         const label = `${r.instr.text}${loops && nth.get(r.seq) ? ` (${nth.get(r.seq)})` : ''}`
         return <g key={r.seq}>
           {r.bubble
-            ? <text x={10} y={y(k) + RH / 2 + 5} fontSize={13} fill="#868e96" fontStyle="italic">bubble (stall)</text>
-            : <><circle cx={18} cy={y(k) + RH / 2} r={9} fill={r.gone ? '#d6336c' : instrColor(r.instr)} /><text x={18} y={y(k) + RH / 2 + 4} textAnchor="middle" fontSize={10} fontWeight={700} fill="white">{r.instr.id + 1}</text>
-              <text x={34} y={y(k) + RH / 2 + 5} fontSize={14} fontFamily="Consolas, monospace" fill={r.gone ? '#a61e4d' : '#1d1b16'} textDecoration={r.gone ? 'line-through' : undefined}>{label}</text>
-              {r.gone && <text x={LW - 8} y={y(k) + RH / 2 + 5} fontSize={11} textAnchor="end" fill="#d6336c" fontWeight={700}>{r.gone.why === 'flush' ? 'flushed' : 'discarded'}</text>}</>}
+            ? <text x={10} y={y(k) + RH / 2 + 5} fontSize={13} fill="var(--gray-500)" fontStyle="italic">bubble (stall)</text>
+            : <><circle cx={18} cy={y(k) + RH / 2} r={9} fill={r.gone ? 'var(--flush)' : instrColor(r.instr)} /><text x={18} y={y(k) + RH / 2 + 4} textAnchor="middle" fontSize={10} fontWeight={700} fill="white">{r.instr.id + 1}</text>
+              <text x={34} y={y(k) + RH / 2 + 5} fontSize={14} fontFamily="Consolas, monospace" fill={r.gone ? 'var(--explain-flush-text)' : 'var(--ink)'} textDecoration={r.gone ? 'line-through' : undefined}>{label}</text>
+              {r.gone && <text x={LW - 8} y={y(k) + RH / 2 + 5} fontSize={11} textAnchor="end" fill="var(--flush)" fontWeight={700}>{r.gone.why === 'flush' ? 'flushed' : 'discarded'}</text>}</>}
           {[...r.cells.entries()].map(([n, cell]) => {
             const future = n > now
-            const fill = r.bubble ? '#fff' : cell.gone ? 'url(#tc-flush)' : cell.repeat ? 'url(#tc-hatch)' : tint(instrColor(r.instr), '26')
-            const stroke = r.bubble ? '#adb5bd' : cell.gone ? '#d6336c' : cell.repeat ? '#e03131' : instrColor(r.instr)
+            const fill = r.bubble ? 'var(--card)' : cell.gone ? 'url(#tc-flush)' : cell.repeat ? 'url(#tc-hatch)' : tint(instrColor(r.instr), '26')
+            const stroke = r.bubble ? 'var(--gray-400)' : cell.gone ? 'var(--flush)' : cell.repeat ? 'var(--hazard)' : instrColor(r.instr)
             return <g key={n} opacity={future ? 0.35 : 1}>
               <rect x={x(n) + 3} y={y(k) + 4} width={CW - 6} height={RH - 8} rx={6} fill={fill} stroke={stroke} strokeDasharray={r.bubble || cell.gone ? '4 3' : undefined} strokeWidth={cell.kill ? 2.6 : 1.3} />
-              <text x={x(n) + CW / 2} y={y(k) + RH / 2 + 5} textAnchor="middle" fontSize={13} fontWeight={r.bubble || cell.gone ? 400 : 600} fill={r.bubble ? '#868e96' : cell.gone ? '#a61e4d' : cell.repeat ? '#c92a2a' : '#1d1b16'}>{r.bubble ? 'nop' : cell.stage}</text>
-              {cell.kill && <text x={x(n) + CW - 7} y={y(k) + 13} textAnchor="end" fontSize={11} fontWeight={700} fill="#d6336c">✕</text>}
+              <text x={x(n) + CW / 2} y={y(k) + RH / 2 + 5} textAnchor="middle" fontSize={13} fontWeight={r.bubble || cell.gone ? 400 : 600} fill={r.bubble ? 'var(--gray-500)' : cell.gone ? 'var(--explain-flush-text)' : cell.repeat ? 'var(--tag-hazard-text)' : 'var(--ink)'}>{r.bubble ? 'nop' : cell.stage}</text>
+              {cell.kill && <text x={x(n) + CW - 7} y={y(k) + 13} textAnchor="end" fontSize={11} fontWeight={700} fill="var(--flush)">✕</text>}
             </g>
           })}
         </g>
@@ -396,7 +396,7 @@ function TimingStrip({ c, phase, hw }: { c: Cycle; phase: Phase; hw: Hardware })
       <span>2nd half · next ↑ edge</span>
     </div>
     {rows.map((r) => {
-      const color = !r.p ? '#ced4da' : r.p.squashed ? '#d6336c' : r.p.bubble ? '#868e96' : instrColor(r.p.instr)
+      const color = !r.p ? 'var(--gray-350)' : r.p.squashed ? 'var(--flush)' : r.p.bubble ? 'var(--gray-500)' : instrColor(r.p.instr)
       return <div key={r.st} className="pl-timing-row">
         <b>{r.st}</b>
         <div className={`pl-timing-bar ${r.p ? '' : 'empty'}`} style={{ ['--c' as string]: color }}>
@@ -420,7 +420,7 @@ function TimingStrip({ c, phase, hw }: { c: Cycle; phase: Phase; hw: Hardware })
 const TONE_TAG: Record<string, string> = { ex: 'ex', mem: 'mem', hazard: 'hazard', rf: 'rf', branch: 'branch', flush: 'flush', muted: 'muted' }
 
 function StageCardView({ card, detail }: { card: StageCard; detail: boolean }) {
-  const color = card.gone ? '#d6336c' : !card.instr ? '#ced4da' : card.bubble ? '#868e96' : instrColor(card.instr)
+  const color = card.gone ? 'var(--flush)' : !card.instr ? 'var(--gray-350)' : card.bubble ? 'var(--gray-500)' : instrColor(card.instr)
   return <section className={`pl-card ${card.instr ? '' : 'empty'}`} style={{ borderTopColor: color }}>
     <header>
       <b>{card.stage}</b>
@@ -702,17 +702,17 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
           </aside>}
       </div>
       <div className="pl-legend">
-        <span><i style={{ background: '#e8590c' }} />EX/MEM → ALU (Forward = 10){lesson.branches && hw.branch === 'id' ? ' or → comparator' : ''}</span>
-        <span><i style={{ background: '#7048e8' }} />MEM/WB → ALU (Forward = 01)</span>
-        <span><i style={{ background: '#e03131' }} />hazard detection / stall</span>
+        <span><i style={{ background: 'var(--fwd-exmem)' }} />EX/MEM → ALU (Forward = 10){lesson.branches && hw.branch === 'id' ? ' or → comparator' : ''}</span>
+        <span><i style={{ background: 'var(--fwd-memwb)' }} />MEM/WB → ALU (Forward = 01)</span>
+        <span><i style={{ background: 'var(--hazard)' }} />hazard detection / stall</span>
         {lesson.branches && <>
-          <span><i style={{ background: '#2b8a3e' }} />branch taken: target → PC</span>
-          <span><i style={{ background: '#d6336c' }} />flushed / thrown away</span>
+          <span><i style={{ background: 'var(--branch)' }} />branch taken: target → PC</span>
+          <span><i style={{ background: 'var(--flush)' }} />flushed / thrown away</span>
         </>}
-        <span><i style={{ background: '#0c8599' }} />register file write / read</span>
-        <span><i style={{ background: '#111' }} />data</span>
-        <span><i style={{ background: '#24519e' }} />control</span>
-        <span><i style={{ background: '#cdcdcd' }} />not used now</span>
+        <span><i style={{ background: 'var(--regfile)' }} />register file write / read</span>
+        <span><i style={{ background: 'var(--wire-data)' }} />data</span>
+        <span><i style={{ background: 'var(--wire-ctrl)' }} />control</span>
+        <span><i style={{ background: 'var(--wire-faded)' }} />not used now</span>
       </div>
     </section>
 

@@ -165,7 +165,7 @@ export function DatapathWalk() {
     <g fontFamily="Consolas, ui-monospace, monospace" fontWeight={700} fontSize={23}>
       {CONTROL_LINES.map((c) => {
         const v = sig[c.name as Sig]
-        const col = v === 'X' || v === 'XX' ? '#9a9a9a' : v.includes('1') ? COLORS.chosen : COLORS.ctrl
+        const col = v === 'X' || v === 'XX' ? 'var(--dont-care)' : v.includes('1') ? COLORS.chosen : COLORS.ctrl
         return (
           <text key={c.id} x={790} y={c.y - 10} fill={col} stroke="white" strokeWidth={5} paintOrder="stroke">
             = {v}
