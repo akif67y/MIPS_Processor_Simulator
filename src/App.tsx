@@ -5,7 +5,8 @@ import { AddBne } from './lessons/AddBne'
 import { ExtensionPage, type ExtensionSpec } from './lessons/ExtensionPage'
 import { JAL, JR, LUI, ORI, SLT } from './lessons/extensions'
 import { Forwarding } from './lessons/Forwarding'
-import { PipelineLab } from './lessons/PipelineLab'
+import { ControlHazardLab, DataHazardLab } from './lessons/PipelineLab'
+import { BranchPrediction } from './lessons/BranchPrediction'
 
 const ext = (spec: ExtensionSpec) => () => <ExtensionPage spec={spec} />
 
@@ -20,11 +21,17 @@ const PAGES: { path: string; title: string; Page: ComponentType }[] = [
   { path: 'add-ori', title: '+ ori', Page: ext(ORI) },
   { path: 'slt', title: 'slt', Page: ext(SLT) },
   { path: 'forwarding', title: 'Forwarding', Page: Forwarding },
-  { path: 'pipeline-lab', title: 'Pipeline lab', Page: PipelineLab },
+  { path: 'data-hazards', title: 'Data hazards', Page: DataHazardLab },
+  { path: 'control-hazards', title: 'Control hazards', Page: ControlHazardLab },
+  { path: 'branch-prediction', title: 'Branch prediction', Page: BranchPrediction },
 ]
 
+// Old addresses that still work.
+const ALIASES: Record<string, string> = { 'pipeline-lab': 'data-hazards' }
+
 function currentPath() {
-  return window.location.hash.replace(/^#\/?/, '')
+  const p = window.location.hash.replace(/^#\/?/, '')
+  return ALIASES[p] ?? p
 }
 
 export default function App() {

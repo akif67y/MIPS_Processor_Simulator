@@ -15,8 +15,11 @@ import type { ReactNode } from 'react'
  *  exmem    – value forwarded from the EX/MEM pipeline register (Forward = 10)
  *  memwb    – value forwarded from the MEM/WB pipeline register (Forward = 01)
  *  hazard   – hazard detection unit / stall signals
- *  rf       – register-file write (first half) and read (second half) */
-export type Look = 'normal' | 'chosen' | 'computed' | 'faded' | 'added' | 'hidden' | 'exmem' | 'memwb' | 'hazard' | 'rf'
+ *  rf       – register-file write (first half) and read (second half)
+ *  Control-hazard lab only:
+ *  branch   – taken-branch path (target, PCSrc = 1)
+ *  flush    – flush signals and flushed instructions */
+export type Look = 'normal' | 'chosen' | 'computed' | 'faded' | 'added' | 'hidden' | 'exmem' | 'memwb' | 'hazard' | 'rf' | 'branch' | 'flush'
 
 export const COLORS = {
   data: '#111111',
@@ -30,12 +33,16 @@ export const COLORS = {
   memwb: '#7048e8',
   hazard: '#e03131',
   rf: '#0c8599',
+  branch: '#2b8a3e',
+  flush: '#d6336c',
 }
 
 /** Looks drawn with a heavier stroke because they are the point of the picture. */
 export function hot(look: Look) {
-  return look === 'chosen' || look === 'exmem' || look === 'memwb' || look === 'hazard' || look === 'rf'
+  return look === 'chosen' || look === 'exmem' || look === 'memwb' || look === 'hazard' || look === 'rf' || look === 'branch' || look === 'flush'
 }
+const OWN = ['exmem', 'memwb', 'hazard', 'rf', 'branch', 'flush'] as const
+const own = (look: Look): look is (typeof OWN)[number] => (OWN as readonly string[]).includes(look)
 
 export type Kind = 'data' | 'ctrl'
 
@@ -44,14 +51,14 @@ export function strokeOf(look: Look, kind: Kind = 'data') {
   if (look === 'computed') return COLORS.computed
   if (look === 'faded') return COLORS.faded
   if (look === 'added') return COLORS.added
-  if (look === 'exmem' || look === 'memwb' || look === 'hazard' || look === 'rf') return COLORS[look]
+  if (own(look)) return COLORS[look]
   return kind === 'ctrl' ? COLORS.ctrl : COLORS.data
 }
 
 export function textOf(look: Look, kind: Kind = 'data') {
   if (look === 'faded') return COLORS.fadedText
   if (look === 'added') return COLORS.added
-  if (look === 'exmem' || look === 'memwb' || look === 'hazard' || look === 'rf') return COLORS[look]
+  if (own(look)) return COLORS[look]
   return kind === 'ctrl' ? COLORS.ctrl : COLORS.data
 }
 

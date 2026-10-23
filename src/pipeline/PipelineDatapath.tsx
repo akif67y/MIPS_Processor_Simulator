@@ -1,15 +1,25 @@
 // The pipelined datapath with forwarding and hazard detection, drawn like
 // Chapter 4 Part 2 slides 52, 65 and 75 (Patterson & Hennessy Fig. 4.51/4.56/4.60)
-// with the shapes of the single-cycle lessons. Branch hardware is left out until
-// the control-hazard lesson.
+// with the shapes of the single-cycle lessons.
+//
+// With branch hardware (control-hazard lab) the same drawing gains:
+//  - 'mem' (slide 77, Fig. 4.51): shift left 2 + branch adder in EX, Zero, Branch AND Zero in MEM,
+//    and IF.Flush / ID.Flush / EX.Flush when the branch is taken;
+//  - 'id' (slide 78, Fig. 4.62): shift left 2 + branch adder and the "=" comparator in ID, with
+//    EX/MEM forwarding into the comparator (slide 79) and IF.Flush.
+// Both add a PC mux in IF and a band above the sheet that carries PCSrc and the target back to it.
+// The base coordinates never change: x is warped (X) to open room for the added units.
+//
+// The base sheet is 2100 × 1280 and the text is sized like the single-cycle diagram
+// (units 22–24, ports and signals 17–19), so at page width it reads the same.
 
 import type { ReactNode } from 'react'
-import { Adder, Box, COLORS, Label, Mux, MuxN, Oval, Wire, hot, type Look } from '../datapath/shapes'
-import { regName, hex, dontCare, type Controls, type Cycle, type Instr } from './engine'
+import { Adder, AndGate, Box, COLORS, Label, Mux, MuxN, Oval, Wire, hot, type Look } from '../datapath/shapes'
+import { regName, hex, dontCare, isBranch, type Controls, type Cycle, type Hardware, type Instr, type Squash } from './engine'
 import type { Phase } from './explain'
 import { instrColor, tint } from './colors'
 
-type Group = 'pc' | 'if' | 'id' | 'hdu' | 'ex' | 'fu' | 'mem' | 'wb' | 'rf' | 'regs'
+type Group = 'pc' | 'if' | 'id' | 'hdu' | 'ex' | 'fu' | 'mem' | 'wb' | 'rf' | 'regs' | 'br'
 type Pt = [number, number]
 
 /** What each sub-step of a cycle puts in the spotlight. */
@@ -18,78 +28,97 @@ const SPOT: Record<Phase, Group[]> = {
   wb: ['wb', 'rf'],
   id: ['pc', 'if', 'id', 'hdu', 'rf'],
   ex: ['ex', 'fu', 'mem'],
+  br: ['br', 'pc'],
 }
 
-
-const W = 2320
-const H = 1350
+const W = 2100
+const H = 1280
 const MONO = 'Consolas, ui-monospace, monospace'
 const FONT = 'Arial, Helvetica, sans-serif'
 
 // Pipeline registers: x, width, top of the bar (the control boxes form a staircase as on slide 52).
 const REG = {
-  ifid: { x: 470, w: 36, top: 330, name: 'IF/ID' },
-  idex: { x: 1130, w: 40, top: 330, name: 'ID/EX' },
-  exmem: { x: 1710, w: 40, top: 370, name: 'EX/MEM' },
-  memwb: { x: 2080, w: 40, top: 410, name: 'MEM/WB' },
+  ifid: { x: 400, w: 40, top: 270, name: 'IF/ID' },
+  idex: { x: 1000, w: 40, top: 270, name: 'ID/EX' },
+  exmem: { x: 1540, w: 40, top: 310, name: 'EX/MEM' },
+  memwb: { x: 1900, w: 40, top: 350, name: 'MEM/WB' },
 }
-const BOTTOM = 1130
+const BOTTOM = 1025
 // A pipeline register is lit whenever a stage that reads or writes it is in the spotlight.
 const BAR_GROUPS: Record<keyof typeof REG, Group[]> = {
-  ifid: ['regs', 'if', 'id', 'hdu'],
-  idex: ['regs', 'id', 'hdu', 'ex'],
-  exmem: ['regs', 'ex', 'mem', 'fu'],
+  ifid: ['regs', 'if', 'id', 'hdu', 'br'],
+  idex: ['regs', 'id', 'hdu', 'ex', 'br'],
+  exmem: ['regs', 'ex', 'mem', 'fu', 'br'],
   memwb: ['regs', 'mem', 'wb', 'fu'],
 }
 
 // Ellipses that wires start or end on.
-const HDU = { cx: 850, cy: 180, rx: 115, ry: 55 }
-const FU = { cx: 1420, cy: 1205, rx: 125, ry: 45 }
+const HDU = { cx: 770, cy: 140, rx: 140, ry: 48 }
+const FU = { cx: 1290, cy: 1115, rx: 140, ry: 50 }
+const CMP = { cx: 1165, cy: 630, rx: 30, ry: 56 } // branch comparator (ID mode, already warped)
 type Ell = typeof HDU
 const xAt = (e: Ell, y: number, side: -1 | 1) => e.cx + side * e.rx * Math.sqrt(Math.max(0, 1 - ((y - e.cy) / e.ry) ** 2))
 const yAt = (e: Ell, x: number, side: -1 | 1) => e.cy + side * e.ry * Math.sqrt(Math.max(0, 1 - ((x - e.cx) / e.rx) ** 2))
 
+// Lanes of the band above the sheet (branch hardware only).
+const TARGET_Y = -40
+const PCSRC_Y = -12
+
 const fwdLook = (sel: string): Look => (sel === '10' ? 'exmem' : sel === '01' ? 'memwb' : 'normal')
 const rank = (l: Look) => (l === 'faded' ? 0 : hot(l) ? 2 : 1)
 
-function ctrlBits(c: Controls, part: 'WB' | 'M' | 'EX', op?: Instr['op']) {
+function ctrlBits(c: Controls, part: 'WB' | 'M' | 'EX', op?: Instr['op'], branchInM = false) {
   const x = dontCare(op)
   const b = (k: keyof Controls, v: string) => (x.includes(k) ? 'X' : v)
   if (part === 'WB') return b('RegWrite', String(c.RegWrite)) + b('MemtoReg', String(c.MemtoReg))
-  if (part === 'M') return String(c.MemRead) + String(c.MemWrite)
+  if (part === 'M') return (branchInM ? String(c.Branch) : '') + String(c.MemRead) + String(c.MemWrite)
   return b('RegDst', String(c.RegDst)) + c.ALUOp.toString(2).padStart(2, '0') + String(c.ALUSrc)
 }
 
 /** Small value tag (monospace, white box) placed over the diagram. */
-function Tag({ x, y, text, color = '#212529', anchor = 'middle', bold = true }: { x: number; y: number; text: string; color?: string; anchor?: 'start' | 'middle' | 'end'; bold?: boolean }) {
-  const w = text.length * 9.6 + 14
+function Tag({ x, y, text, color = '#212529', anchor = 'middle' }: { x: number; y: number; text: string; color?: string; anchor?: 'start' | 'middle' | 'end' }) {
+  const w = text.length * 11.1 + 16
   const left = anchor === 'start' ? x : anchor === 'middle' ? x - w / 2 : x - w
   return (
     <g fontFamily={MONO} pointerEvents="none">
-      <rect x={left} y={y - 18} width={w} height={25} rx={6} fill="white" stroke={color} strokeWidth={1.8} />
-      <text x={left + 7} y={y} fontSize={17} fontWeight={bold ? 700 : 400} fill={color}>{text}</text>
+      <rect x={left} y={y - 21} width={w} height={29} rx={7} fill="white" stroke={color} strokeWidth={2} />
+      <text x={left + 8} y={y} fontSize={20} fontWeight={700} fill={color}>{text}</text>
     </g>
   )
 }
 
 /** Label with a white halo so it stays readable where it crosses wires. */
-function Halo({ x, y, children, color = COLORS.ctrl, size = 16, anchor = 'start', rotate = false, bold = false }: { x: number; y: number; children: ReactNode; color?: string; size?: number; anchor?: 'start' | 'middle' | 'end'; rotate?: boolean; bold?: boolean }) {
+function Halo({ x, y, children, color = COLORS.ctrl, size = 18, anchor = 'start', rotate = false, bold = false }: { x: number; y: number; children: ReactNode; color?: string; size?: number; anchor?: 'start' | 'middle' | 'end'; rotate?: boolean; bold?: boolean }) {
   return (
     <text x={x} y={y} fontFamily={FONT} fontSize={size} fontWeight={bold ? 700 : 400} fill={color} textAnchor={anchor}
-      stroke="white" strokeWidth={4} paintOrder="stroke" transform={rotate ? `rotate(-90 ${x} ${y})` : undefined}>
+      stroke="white" strokeWidth={5} paintOrder="stroke" transform={rotate ? `rotate(-90 ${x} ${y})` : undefined}>
       {children}
     </text>
   )
 }
 
-export function PipelineDatapath({ cycle: c, phase, spotlight, values }: { cycle: Cycle; phase: Phase; spotlight: boolean; values: boolean }) {
+/** Text for a packet that was thrown away by a branch. */
+const goneText = (s: Squash) => `${s.why === 'flush' ? 'flushed' : 'discarded'}: ${s.instr.text}`
+
+export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }: { cycle: Cycle; phase: Phase; spotlight: boolean; values: boolean; hw?: Hardware }) {
+  const BR = hw.branch
+  // Room for the added units: ID mode widens ID (from x 1000), MEM mode widens EX (from 1050) and MEM (from 1600).
+  const DX = BR === 'id' ? 480 : BR === 'mem' ? 240 : 0
+  const BREAK = BR === 'id' ? 1000 : 1050
+  const DX2 = BR === 'mem' ? 130 : 0
+  const X = (x: number) => x + (x >= BREAK ? DX : 0) + (x >= 1600 ? DX2 : 0)
+  const sh = (x: number) => `translate(${X(x) - x},0)` // shifts a group drawn in base coordinates
+  const LEFT = BR ? 210 : 0
+  const TOP = BR ? 150 : 0
+
   const { ifid, idex, exmem, memwb } = c.at
   const F = c.fetch.instr
-  const D = ifid?.instr ?? null
-  const E = idex && !idex.bubble ? idex : null
-  const M = exmem && !exmem.bubble ? exmem : null
-  const Wb = memwb && !memwb.bubble ? memwb : null
-  const stall = c.hazard.stall
+  const D = ifid && !ifid.squashed ? ifid.instr : null
+  const E = idex && !idex.bubble && !idex.squashed ? idex : null
+  const M = exmem && !exmem.bubble && !exmem.squashed ? exmem : null
+  const Wb = memwb && !memwb.bubble && !memwb.squashed ? memwb : null
+  const stall = c.hazard.stall && !c.hazard.overridden
+  const asked = c.hazard.stall // the hazard detection unit asked for a stall (it may be overridden by a flush)
   const ex = E ? c.ex : null
   const fa = ex?.fa.sel ?? '00'
   const fb = ex?.fb.sel ?? '00'
@@ -101,357 +130,518 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values }: { cycle
   const on = (cond: unknown, look: Look = 'normal'): Look => (cond ? look : 'faded')
   const rfLook = (cond: unknown): Look => (cond ? (phase === 'wb' ? 'rf' : 'normal') : 'faded')
   const lit = (gs: Group[]) => !spotlight || gs.some((g) => SPOT[phase].includes(g))
-  const op = (gs: Group[]) => (lit(gs) ? 1 : 0.2)
+  const op = (gs: Group[]) => (lit(gs) ? 1 : 0.18)
   const showFwd = !spotlight || phase === 'ex'
   const show = (gs: Group[]) => values && lit(gs)
 
-  type WireDef = { pts: Pt[]; look: Look; g: Group[]; kind?: 'data' | 'ctrl'; thick?: boolean; arrow?: boolean; dots?: Pt[] }
+  // Branch state for this cycle.
+  const b = c.branch
+  const showBr = !spotlight || phase === 'br'
+  const taken = !!b?.taken
+  const flushing = c.squash?.why === 'flush'
+  const ifFlush = !!c.squash?.ifid // a taken-branch flush, or a fetch discarded while waiting (stall on branch)
+  const idBranch = BR === 'id' && D && isBranch(D.op) ? D : null
+  const idBranchWait = !!idBranch && stall
+  const exBranch = BR === 'mem' && E && isBranch(E.instr.op) ? E : null
+
+  type WireDef = { pts: Pt[]; look: Look; g: Group[]; kind?: 'data' | 'ctrl'; thick?: boolean; arrow?: boolean; dots?: Pt[]; raw?: boolean }
   const wires: WireDef[] = []
   const w = (g: Group[], look: Look, pts: Pt[], opts: Partial<WireDef> = {}) => wires.push({ g, look, pts, ...opts })
+  // Wire already in final (warped) coordinates.
+  const wr = (g: Group[], look: Look, pts: Pt[], opts: Partial<WireDef> = {}) => wires.push({ g, look, pts, raw: true, ...opts })
   const ctl = { kind: 'ctrl' as const, arrow: true }
 
   // ---------- IF ----------
-  w(['if', 'pc'], on(F), [[155, 700], [200, 700]], { dots: [[175, 700]] })
-  w(['if'], on(F), [[175, 700], [175, 410], [230, 410]])
-  w(['if'], on(F), [[195, 510], [230, 510]])
-  w(['if'], on(F), [[320, 460], [470, 460]], { dots: [[345, 460]] })
-  w(['if', 'pc'], on(F && !stall), [[345, 460], [345, 300], [60, 300], [60, 700], [95, 700]])
-  w(['if'], on(F), [[390, 700], [470, 700]])
+  const pcLoop: Look = on(F && !c.pcSrc && c.next.pc === c.at.pc + 4)
+  w(['if', 'pc'], on(F), [[120, 630], [170, 630]], { dots: [[145, 630]] })
+  w(['if'], on(F), [[145, 630], [145, 375], [200, 375]])
+  w(['if'], on(F), [[180, 485], [200, 485]])
+  w(['if'], on(F), [[300, 430], [400, 430]], { dots: [[340, 430]] })
+  if (BR) {
+    wr(['if', 'pc'], pcLoop, [[340, 430], [340, 250], [-150, 250], [-150, 595], [-120, 595]])
+    wr(['pc', 'br'], c.pcSrc ? 'branch' : on(F || c.at.ifid), [[-80, 630], [60, 630]])
+  } else {
+    w(['if', 'pc'], on(F && !stall), [[340, 430], [340, 250], [30, 250], [30, 630], [60, 630]])
+  }
+  w(['if'], on(F), [[370, 640], [400, 640]])
 
   // ---------- ID ----------
-  w(['id'], on(D), [[506, 700], [530, 700]], { arrow: false, dots: [[530, 700]] })
-  w(['id'], on(D), [[530, 1105], [530, 385], [645, 385]])
-  w(['id'], on(D), [[530, 600], [640, 600]], { dots: [[530, 600]] })
-  w(['id'], on(D), [[530, 680], [640, 680]], { dots: [[530, 680]] })
-  w(['id'], on(D), [[530, 960], [715, 960]], { dots: [[530, 960]] })
-  w(['id'], on(D), [[815, 960], [1130, 960]])
-  w(['id'], on(D), [[530, 1035], [1130, 1035]], { dots: [[530, 1035]] })
-  w(['id'], on(D), [[530, 1065], [1130, 1065]], { dots: [[530, 1065]] })
-  w(['id'], on(D), [[530, 1105], [1130, 1105]])
-  w(['id'], on(D, c.id?.sameCycleRs ? 'rf' : 'normal'), [[890, 620], [1130, 620]])
-  w(['id'], on(D, c.id?.sameCycleRt ? 'rf' : 'normal'), [[890, 820], [1130, 820]])
-  w(['id'], on(D), [[506, 460], [1130, 460]])
-  w(['id'], on(D && !stall), [[735, 385], [1000, 385], [1000, 350], [1040, 350]], ctl)
-  w(['id', 'hdu'], stall ? 'hazard' : 'faded', [[1022, 430], [1040, 430]], ctl)
+  w(['id'], on(D), [[440, 640], [470, 640]], { arrow: false, dots: [[470, 640]] })
+  w(['id'], on(D), [[470, 1000], [470, 320], [610, 320]])
+  w(['id'], on(D), [[470, 520], [590, 520]], { dots: [[470, 520]] })
+  w(['id'], on(D), [[470, 590], [590, 590]], { dots: [[470, 590]] })
+  w(['id'], on(D), [[470, 900], [665, 900]], { dots: [[470, 900]] })
+  w(['id'], on(D), [[775, 900], [1000, 900]])
+  w(['id'], on(D), [[470, 940], [1000, 940]], { dots: [[470, 940]] })
+  w(['id'], on(D), [[470, 965], [1000, 965]], { dots: [[470, 965]] })
+  w(['id'], on(D), [[470, 1000], [1000, 1000]])
+  w(['id'], on(D, c.id?.sameCycleRs ? 'rf' : 'normal'), [[880, 540], [1000, 540]])
+  w(['id'], on(D, c.id?.sameCycleRt ? 'rf' : 'normal'), [[880, 715], [1000, 715]])
+  if (BR !== 'id') w(['id'], on(D), [[440, 430], [1000, 430]])
+  w(['id'], on(D && !stall), [[710, 300], [910, 300]], ctl)
+  w(['id', 'hdu'], asked ? 'hazard' : 'faded', [[885, 365], [910, 365]], ctl)
   const ctrlOut: Look = D ? (stall ? 'hazard' : 'normal') : 'faded'
-  w(['id'], ctrlOut, [[1080, 390], [1100, 390], [1100, 350], [1130, 350]], { ...ctl, dots: [[1100, 390]] })
-  w(['id'], ctrlOut, [[1080, 390], [1130, 390]], ctl)
-  w(['id'], ctrlOut, [[1100, 390], [1100, 430], [1130, 430]], ctl)
+  w(['id'], ctrlOut, [[950, 330], [1000, 330]], { ...ctl, dots: [[975, 330]] })
+  w(['id'], ctrlOut, [[975, 330], [975, 290], [1000, 290]], ctl)
+  w(['id'], ctrlOut, [[975, 330], [975, 370], [1000, 370]], ctl)
 
   // ---------- hazard detection unit (slide 75) ----------
   const hz = c.hazard
-  const hzIn = (match: boolean): Look => (!hz.checked ? 'faded' : stall && match ? 'hazard' : 'normal')
-  w(['hdu'], hzIn(hz.matchRs), [[560, 600], [560, 190], [xAt(HDU, 190, -1), 190]], { dots: [[560, 600]] })
-  w(['hdu'], hzIn(hz.matchRt), [[580, 680], [580, 210], [xAt(HDU, 210, -1), 210]], { dots: [[580, 680]] })
-  w(['hdu'], idex ? (stall ? 'hazard' : 'normal') : 'faded', [[1182, 390], [1182, 165], [xAt(HDU, 165, 1), 165]], { ...ctl, dots: [[1182, 390]] })
-  w(['hdu'], idex ? (stall ? 'hazard' : 'normal') : 'faded', [[1170, 490], [1196, 490], [1196, 145], [xAt(HDU, 145, 1), 145]])
-  w(['hdu', 'pc'], stall ? 'hazard' : 'normal', [[xAt(HDU, 155, -1), 155], [125, 155], [125, 640]], ctl)
-  w(['hdu'], stall ? 'hazard' : 'normal', [[xAt(HDU, 172, -1), 172], [488, 172], [488, REG.ifid.top]], ctl)
-  w(['hdu'], stall ? 'hazard' : 'normal', [[xAt(HDU, 210, 1), 210], [1060, 210], [1060, 325]], ctl)
+  const hzIn = (match: boolean): Look => (!hz.checked ? 'faded' : asked && match ? 'hazard' : 'normal')
+  const hzOut: Look = asked ? 'hazard' : 'normal'
+  const ifidWriteX = BR ? 412 : 420
+  w(['hdu'], hzIn(hz.matchRs || !!hz.branch?.aluRs || !!hz.branch?.loadRs), [[500, 520], [500, 155], [xAt(HDU, 155, -1), 155]], { dots: [[500, 520]] })
+  w(['hdu'], hzIn(hz.matchRt || !!hz.branch?.aluRt || !!hz.branch?.loadRt), [[525, 590], [525, 175], [xAt(HDU, 175, -1), 175]], { dots: [[525, 590]] })
+  w(['hdu'], idex ? hzOut : 'faded', [[1060, 330], [1060, 115], [xAt(HDU, 115, 1), 115]], { ...ctl, dots: [[1060, 330]] })
+  w(['hdu'], idex ? hzOut : 'faded', [[1085, 965], [1085, 140], [xAt(HDU, 140, 1), 140]], { dots: [[1085, 965]] })
+  w(['hdu', 'pc'], stall ? 'hazard' : 'normal', [[xAt(HDU, 110, -1), 110], [90, 110], [90, 560]], ctl)
+  w(['hdu'], stall ? 'hazard' : 'normal', [[xAt(HDU, 130, -1), 130], [ifidWriteX, 130], [ifidWriteX, REG.ifid.top]], ctl)
+  w(['hdu'], hzOut, [[xAt(HDU, 168, 1), 168], [930, 168], [930, 270]], ctl)
+  if (BR === 'id') {
+    // Slides 80–81: the unit also needs EX/MEM.MemRead and EX/MEM.RegisterRd (a load in MEM).
+    const lk: Look = !hz.branch ? 'faded' : hz.branch.loadRs || hz.branch.loadRt ? 'hazard' : 'normal'
+    wr(['hdu'], lk, [[X(1595), 980], [X(1595), 70], [830, 70], [830, yAt(HDU, 830, -1)]], { dots: [[X(1595), 980]] })
+  }
 
   // ---------- EX ----------
-  w(['ex'], on(E), [[1170, 350], [1690, 350], [1690, 390], [1710, 390]], ctl)
-  w(['ex'], on(E), [[1170, 390], [1680, 390], [1680, 430], [1710, 430]], ctl)
-  w(['ex'], on(E), [[1170, 420], [1418, 420], [1418, 835]], ctl)
-  w(['ex'], on(E), [[1170, 432], [1620, 432], [1620, 1022], [1540, 1022], [1540, 1010]], { ...ctl, thick: true })
-  w(['ex'], on(E && E.ctrl.RegWrite), [[1170, 444], [1668, 444], [1668, 1040]], ctl)
-  w(['ex'], on(E && fa === '00'), [[1170, 620], [1290, 620]])
-  w(['ex'], on(E && fb === '00' && bUsed), [[1170, 820], [1290, 820]])
-  w(['ex'], E ? fwdLook(fa) : 'faded', [[1340, 665], [1480, 665]])
-  w(['ex'], E && bUsed ? fwdLook(fb) : 'faded', [[1340, 865], [1366, 865]], { arrow: false, dots: [[1366, 865]] })
-  w(['ex'], E && !E.ctrl.ALUSrc ? fwdLook(fb) : 'faded', [[1366, 865], [1400, 865]])
-  w(['ex'], E?.ctrl.MemWrite ? fwdLook(fb) : 'faded', [[1366, 865], [1366, 930], [1710, 930]])
-  w(['ex'], on(E), [[1170, 960], [1499, 960]], { dots: [[1382, 960]] })
-  w(['ex'], on(E?.ctrl.ALUSrc), [[1382, 960], [1382, 905], [1400, 905]])
-  w(['ex'], on(E), [[1436, 885], [1480, 885]])
-  w(['ex'], on(E), [[1600, 760], [1710, 760]])
-  w(['ex'], on(E), [[1540, 940], [1540, 876]], { ...ctl, thick: true })
-  w(['ex', 'fu'], on(E), [[1170, 1065], [1198, 1065]], { arrow: false, dots: [[1198, 1065]] })
-  w(['ex'], on(E && E.ctrl.RegWrite && !E.ctrl.RegDst), [[1198, 1065], [1650, 1065]])
-  w(['ex'], on(E && E.ctrl.RegWrite && E.ctrl.RegDst), [[1170, 1105], [1650, 1105]])
-  w(['ex'], on(E && E.ctrl.RegWrite), [[1686, 1085], [1710, 1085]])
+  w(['ex'], on(E), [[1040, 290], [1520, 290], [1520, 330], [1540, 330]], ctl)
+  w(['ex'], on(E), [[1040, 330], [1500, 330], [1500, 370], [1540, 370]], ctl)
+  w(['ex'], on(E), [[1040, 360], [1288, 360], [1288, 715]], ctl)
+  w(['ex'], on(E), [[1040, 372], [1460, 372], [1460, 900], [1435, 900]], { ...ctl, thick: true })
+  w(['ex'], on(E && E.ctrl.RegWrite), [[1040, 384], [1498, 384], [1498, 925]], ctl)
+  w(['ex'], on(E && fa === '00'), [[1040, 540], [1140, 540]])
+  w(['ex'], on(E && fb === '00' && bUsed), [[1040, 715], [1140, 715]])
+  w(['ex'], E ? fwdLook(fa) : 'faded', [[1190, 575], [1330, 575]])
+  w(['ex'], E && bUsed ? fwdLook(fb) : 'faded', [[1190, 750], [1225, 750]], { arrow: false, dots: [[1225, 750]] })
+  w(['ex'], E && !E.ctrl.ALUSrc ? fwdLook(fb) : 'faded', [[1225, 750], [1270, 750]])
+  w(['ex'], E?.ctrl.MemWrite ? fwdLook(fb) : 'faded', [[1225, 750], [1225, 845], [1540, 845]])
+  w(['ex'], on(E), [[1040, 900], [1335, 900]], { dots: [[1250, 900]] })
+  w(['ex'], on(E?.ctrl.ALUSrc), [[1250, 900], [1250, 800], [1270, 800]])
+  w(['ex'], on(E), [[1306, 770], [1330, 770]])
+  w(['ex'], on(E), [[1440, 650], [1540, 650]])
+  w(['ex'], on(E), [[1385, 868], [1385, 778]], { ...ctl, thick: true })
+  w(['ex', 'fu'], on(E), [[1040, 965], [1085, 965]], { arrow: false })
+  w(['ex'], on(E && E.ctrl.RegWrite && !E.ctrl.RegDst), [[1085, 965], [1480, 965]])
+  w(['ex'], on(E && E.ctrl.RegWrite && E.ctrl.RegDst), [[1040, 1000], [1480, 1000]])
+  w(['ex'], on(E && E.ctrl.RegWrite), [[1516, 980], [1540, 980]])
 
   // ---------- forwarding unit (slides 61–65) ----------
   const fuIn = (sel: string, src: '10' | '01'): Look => (!E ? 'faded' : showFwd && sel === src ? fwdLook(src) : 'normal')
   const rsIn: Look = !E ? 'faded' : showFwd && fa !== '00' ? fwdLook(fa) : 'normal'
   const rtIn: Look = !E ? 'faded' : showFwd && fb !== '00' && !ex?.fb.unused ? fwdLook(fb) : 'normal'
-  w(['fu'], rsIn, [[1170, 1035], [1212, 1035], [1212, 1190], [xAt(FU, 1190, -1), 1190]])
-  w(['fu'], rtIn, [[1198, 1065], [1198, 1220], [xAt(FU, 1220, -1), 1220]])
+  w(['fu'], rsIn, [[1040, 940], [1062, 940], [1062, 1100], [xAt(FU, 1100, -1), 1100]])
+  w(['fu'], rtIn, [[1085, 965], [1085, 1130], [xAt(FU, 1130, -1), 1130]])
   const exSrc = E && exmem ? fuIn(any10 ? '10' : '', '10') : 'faded'
   const memSrc = E && memwb ? fuIn(any01 ? '01' : '', '01') : 'faded'
-  w(['fu', 'mem'], exSrc, [[1765, 390], [1765, 1168], [xAt(FU, 1168, 1), 1168]], { ...ctl, dots: [[1765, 390]] })
-  w(['fu', 'mem'], exSrc, [[1780, 1085], [1780, 1200], [xAt(FU, 1200, 1), 1200]], { dots: [[1780, 1085]] })
-  w(['fu', 'wb'], memSrc, [[2135, 430], [2135, 1232], [xAt(FU, 1232, 1), 1232]], ctl)
-  w(['fu', 'wb'], memSrc, [[1480, 1290], [1480, yAt(FU, 1480, 1)]], { dots: [[1480, 1290]] })
-  w(['fu'], E ? (fa === '00' ? 'normal' : fwdLook(fa)) : 'faded', [[1352, yAt(FU, 1352, -1)], [1352, 765], [1315, 765], [1315, 740]], ctl)
-  w(['fu'], E ? (fb === '00' ? 'normal' : fwdLook(fb)) : 'faded', [[1315, yAt(FU, 1315, -1)], [1315, 940]], ctl)
+  w(['fu', 'mem'], exSrc, [[1615, 330], [1615, 1080], [xAt(FU, 1080, 1), 1080]], { ...ctl, dots: [[1615, 330]] })
+  w(['fu', 'mem'], exSrc, [[1635, 980], [1635, 1105], [xAt(FU, 1105, 1), 1105]], { dots: [[1635, 980]] })
+  w(['fu', 'wb'], memSrc, [[1955, 378], [1955, 1130], [xAt(FU, 1130, 1), 1130]], ctl)
+  w(['fu', 'wb'], memSrc, [[1380, 1195], [1380, yAt(FU, 1380, 1)]], { dots: [[1380, 1195]] })
+  w(['fu'], E ? (fa === '00' ? 'normal' : fwdLook(fa)) : 'faded', [[1203, yAt(FU, 1203, -1)], [1203, 662], [1165, 662], [1165, 645]], ctl)
+  w(['fu'], E ? (fb === '00' ? 'normal' : fwdLook(fb)) : 'faded', [[1165, yAt(FU, 1165, -1)], [1165, 820]], ctl)
   // EX/MEM.ALUResult → the "10" inputs; MEM/WB value → the "01" inputs.
   // Forwarding paths are only coloured in the EX step (or with the spotlight off).
   const busA10 = showFwd && E && fa === '10', busB10 = showFwd && E && fb === '10' && bUsed
   const busA01 = showFwd && E && fa === '01', busB01 = showFwd && E && fb === '01' && bUsed
-  w(['fu', 'mem'], busA10 || busB10 ? 'exmem' : 'faded', [[1795, 1000], [1795, 1270], [1245, 1270], [1245, 910]], { arrow: false, dots: [[1245, 910]] })
-  w(['fu'], busA10 ? 'exmem' : 'faded', [[1245, 910], [1245, 710], [1290, 710]])
-  w(['fu'], busB10 ? 'exmem' : 'faded', [[1245, 910], [1290, 910]])
-  w(['fu', 'wb'], busA01 || busB01 ? 'memwb' : 'faded', [[1225, 1320], [1225, 865]], { arrow: false, dots: [[1225, 1320], [1225, 865]] })
-  w(['fu'], busA01 ? 'memwb' : 'faded', [[1225, 865], [1225, 665], [1290, 665]])
-  w(['fu'], busB01 ? 'memwb' : 'faded', [[1225, 865], [1290, 865]])
+  // ID mode: the same EX/MEM.ALUResult also feeds the branch comparator muxes (slide 79).
+  const cmpFwd = BR === 'id' && !!b && (b.fa?.sel === 1 || b.fb?.sel === 1)
+  const busCmp = cmpFwd && showBr
+  const cmpG: Group[] = BR === 'id' ? ['br'] : []
+  w(['fu', 'mem', ...cmpG], busA10 || busB10 || busCmp ? 'exmem' : 'faded', [[1650, 900], [1650, 1222], [1118, 1222], [1118, 791]], { arrow: false, dots: [[1118, 791], ...(BR === 'id' ? [[1118, 1222] as Pt] : [])] })
+  w(['fu'], busA10 ? 'exmem' : 'faded', [[1118, 791], [1118, 616], [1140, 616]])
+  w(['fu'], busB10 ? 'exmem' : 'faded', [[1118, 791], [1140, 791]])
+  w(['fu', 'wb'], busA01 || busB01 ? 'memwb' : 'faded', [[1100, 1250], [1100, 753]], { arrow: false, dots: [[1100, 1250], [1100, 753]] })
+  w(['fu'], busA01 ? 'memwb' : 'faded', [[1100, 753], [1100, 578], [1140, 578]])
+  w(['fu'], busB01 ? 'memwb' : 'faded', [[1100, 753], [1140, 753]])
 
   // ---------- MEM ----------
-  w(['mem'], on(M), [[1750, 390], [2060, 390], [2060, 430], [2080, 430]], ctl)
-  w(['mem'], on(M), [[1750, 430], [2040, 430], [2040, 975], [1960, 975], [1960, 960]], ctl)
-  w(['mem'], on(M), [[1930, 430], [1930, 700]], { ...ctl, dots: [[1930, 430]] })
-  const exmemOut: Look = showFwd && (busA10 || busB10) ? 'exmem' : on(M)
-  w(['mem', 'fu'], exmemOut, [[1750, 760], [1795, 760]], { arrow: false, dots: [[1795, 760]] })
-  w(['mem'], on(memOp), [[1795, 760], [1850, 760]])
-  w(['mem', 'fu'], showFwd && (busA10 || busB10) ? 'exmem' : on(M && M.ctrl.RegWrite && !M.ctrl.MemRead), [[1795, 760], [1795, 1000]], { arrow: false, dots: [[1795, 1000]] })
-  w(['mem'], on(M && M.ctrl.RegWrite && !M.ctrl.MemRead), [[1795, 1000], [2080, 1000]])
-  w(['mem'], on(M?.ctrl.MemWrite), [[1750, 930], [1850, 930]])
-  w(['mem'], on(M?.ctrl.MemRead), [[2020, 760], [2080, 760]])
-  w(['mem'], on(M && M.ctrl.RegWrite), [[1750, 1085], [2080, 1085]])
+  // With the branch in MEM the M field carries Branch too, so its three wires are spread out.
+  const [mwY, mrY] = BR === 'mem' ? [358, 371] : [362, 378]
+  w(['mem'], on(M), [[1580, 330], [1880, 330], [1880, 370], [1900, 370]], ctl)
+  w(['mem'], on(M), [[1580, mwY], [1740, mwY], [1740, 560]], ctl)
+  w(['mem'], on(M), [[1580, mrY], [1810, mrY], [1810, 560]], ctl)
+  const exmemOut: Look = showFwd && (busA10 || busB10) ? 'exmem' : busCmp ? 'exmem' : on(M)
+  w(['mem', 'fu', ...cmpG], exmemOut, [[1580, 650], [1650, 650]], { arrow: false, dots: [[1650, 650]] })
+  w(['mem'], on(memOp), [[1650, 650], [1690, 650]])
+  w(['mem', 'fu', ...cmpG], (showFwd && (busA10 || busB10)) || busCmp ? 'exmem' : on(M && M.ctrl.RegWrite && !M.ctrl.MemRead), [[1650, 650], [1650, 900]], { arrow: false, dots: [[1650, 900]] })
+  w(['mem'], on(M && M.ctrl.RegWrite && !M.ctrl.MemRead), [[1650, 900], [1900, 900]])
+  w(['mem'], on(M?.ctrl.MemWrite), [[1580, 845], [1690, 845]])
+  w(['mem'], on(M?.ctrl.MemRead), [[1860, 650], [1900, 650]])
+  w(['mem'], on(M && M.ctrl.RegWrite), [[1580, 980], [1900, 980]])
 
   // ---------- WB (slide 55: write in the first half) ----------
-  w(['wb'], on(Wb), [[2120, 430], [2135, 430]], { ...ctl, arrow: false, dots: [[2135, 430]] })
-  w(['wb', 'rf'], rfLook(Wb?.ctrl.RegWrite), [[2135, 430], [2135, 290], [765, 290], [765, 560]], ctl)
-  w(['wb'], on(Wb?.ctrl.RegWrite), [[2135, 430], [2220, 430], [2220, 738]], ctl)
-  w(['wb'], on(Wb?.ctrl.MemtoReg), [[2120, 760], [2200, 760]])
-  w(['wb'], on(Wb && Wb.ctrl.RegWrite && !Wb.ctrl.MemtoReg), [[2120, 1000], [2165, 1000], [2165, 840], [2200, 840]])
+  w(['wb'], on(Wb), [[1940, 378], [1955, 378]], { ...ctl, arrow: false, dots: [[1955, 378]] })
+  w(['wb', 'rf'], rfLook(Wb?.ctrl.RegWrite), [[1955, 378], [1955, 238], [860, 238], [860, 480]], ctl)
+  w(['wb'], on(Wb?.ctrl.RegWrite), [[1940, 362], [2010, 362], [2010, 622]], ctl)
+  w(['wb'], on(Wb?.ctrl.MemtoReg), [[1940, 650], [1990, 650]])
+  w(['wb'], on(Wb && Wb.ctrl.RegWrite && !Wb.ctrl.MemtoReg), [[1940, 900], [1990, 900]])
   const wbOut: Look = showFwd && (busA01 || busB01) && phase !== 'wb' ? 'memwb' : rfLook(Wb?.ctrl.RegWrite)
-  w(['wb', 'fu'], wbOut, [[2240, 800], [2270, 800], [2270, 1320], [1225, 1320]], { arrow: false })
-  w(['wb', 'rf'], rfLook(writes), [[1225, 1320], [610, 1320], [610, 830], [640, 830]])
+  w(['wb', 'fu'], wbOut, [[2030, 775], [2065, 775], [2065, 1250], [1100, 1250]], { arrow: false })
+  w(['wb', 'rf'], rfLook(writes), [[1100, 1250], [560, 1250], [560, 740], [590, 740]])
   const rdOut: Look = showFwd && (busA01 || busB01) && phase !== 'wb' ? 'memwb' : rfLook(Wb?.ctrl.RegWrite)
-  w(['wb', 'fu'], rdOut, [[2120, 1085], [2150, 1085], [2150, 1290], [1480, 1290]], { arrow: false })
-  w(['wb', 'rf'], rfLook(writes), [[1480, 1290], [625, 1290], [625, 760], [640, 760]])
+  w(['wb', 'fu'], rdOut, [[1940, 980], [1975, 980], [1975, 1195], [1380, 1195]], { arrow: false })
+  w(['wb', 'rf'], rfLook(writes), [[1380, 1195], [575, 1195], [575, 665], [590, 665]])
+
+  // ---------- branch hardware ----------
+  // PCSrc and the target travel back to the PC mux along the band above the sheet.
+  const pcSrcLook: Look = b ? (taken ? 'branch' : 'normal') : 'faded'
+  const targetLook: Look = taken ? 'branch' : b ? 'normal' : 'faded'
+  if (BR === 'mem') {
+    // EX: shift left 2 + Add on ID/EX.PC + 4 and the immediate; Zero from the ALU (Fig. 4.51).
+    const exb: Look = exBranch ? 'normal' : 'faded'
+    wr(['ex', 'br'], exb, [[1040, 430], [1120, 430]])
+    wr(['ex', 'br'], exb, [[1080, 900], [1080, 848]], { dots: [[1080, 900]] })
+    wr(['ex', 'br'], exb, [[1080, 792], [1080, 500], [1120, 500]])
+    wr(['ex', 'br'], exb, [[1200, 460], [X(1540), 460]])
+    wr(['ex', 'br'], exb, [[X(1440), 610], [X(1540), 610]])
+    // MEM: PCSrc = Branch AND Zero.
+    const mb: Look = M?.ctrl.Branch ? (taken ? 'branch' : 'normal') : 'faded'
+    wr(['mem', 'br'], mb, [[X(1580), 384], [1872, 384], [1872, 412], [1888, 412]], ctl)
+    wr(['mem', 'br'], mb, [[X(1580), 610], [1858, 610], [1858, 438], [1888, 438]])
+    wr(['mem', 'br'], pcSrcLook, [[1934, 425], [1950, 425], [1950, PCSRC_Y], [-100, PCSRC_Y], [-100, 560]], { ...ctl, dots: [[430, PCSRC_Y], [1020, PCSRC_Y], [X(1560), PCSRC_Y]] })
+    wr(['mem', 'br'], targetLook, [[X(1580), 460], [1838, 460], [1838, TARGET_Y], [-180, TARGET_Y], [-180, 665], [-120, 665]])
+    // Flush the three younger instructions (slide 77).
+    wr(['br'], ifFlush ? 'flush' : 'faded', [[430, PCSRC_Y], [430, REG.ifid.top]], ctl)
+    wr(['br'], flushing && c.at.ifid ? 'flush' : 'faded', [[1020, PCSRC_Y], [1020, REG.idex.top]], ctl)
+    wr(['br'], flushing && c.at.idex ? 'flush' : 'faded', [[X(1560), PCSRC_Y], [X(1560), REG.exmem.top]], ctl)
+  }
+  if (BR === 'id') {
+    const cmpOn = !!idBranch
+    const cl = (sel: 0 | 1 | undefined): Look => (!cmpOn || idBranchWait ? 'faded' : showBr && sel === 1 ? 'exmem' : 'normal')
+    // Comparator inputs: register value (0) or EX/MEM.ALUResult (1).
+    wr(['br', 'fu'], busCmp ? 'exmem' : 'faded', [[X(1118), 1222], [1010, 1222], [1010, 470], [1045, 470]], { dots: [[1010, 790]] })
+    wr(['br', 'fu'], showBr && b?.fb?.sel === 1 ? 'exmem' : 'faded', [[1010, 790], [1045, 790]])
+    wr(['br'], cmpOn && b?.fa?.sel !== 1 ? 'normal' : 'faded', [[1025, 540], [1025, 510], [1045, 510]], { dots: [[1025, 540]] })
+    wr(['br'], cmpOn && b?.fb?.sel !== 1 ? 'normal' : 'faded', [[1025, 715], [1025, 750], [1045, 750]], { dots: [[1025, 715]] })
+    wr(['br'], cl(b?.fa?.sel), [[1089, 490], [1102, 490], [1102, 605], [xAt(CMP, 605, -1), 605]])
+    wr(['br'], cl(b?.fb?.sel), [[1089, 770], [1102, 770], [1102, 655], [xAt(CMP, 655, -1), 655]])
+    wr(['br'], b ? (b.equal ? 'branch' : 'normal') : 'faded', [[1195, 640], [1240, 640]])
+    wr(['br', 'id'], cmpOn ? (taken ? 'branch' : 'normal') : 'faded', [[660, 380], [660, 400], [1225, 400], [1225, 614], [1240, 614]], ctl)
+    // Target adder in ID: IF/ID.PC + 4 + (immediate << 2).
+    wr(['br', 'id'], cmpOn ? 'normal' : 'faded', [[440, 430], [1340, 430], [1340, 760], [1360, 760]])
+    wr(['br', 'id'], cmpOn ? 'normal' : 'faded', [[1280, 900], [1280, 876]], { dots: [[1280, 900]] })
+    wr(['br', 'id'], cmpOn ? 'normal' : 'faded', [[1336, 850], [1360, 850]])
+    wr(['br'], pcSrcLook, [[1288, 627], [1310, 627], [1310, PCSRC_Y], [-100, PCSRC_Y], [-100, 560]], { ...ctl, dots: [[430, PCSRC_Y]] })
+    wr(['br'], targetLook, [[1425, 805], [1450, 805], [1450, TARGET_Y], [-180, TARGET_Y], [-180, 665], [-120, 665]])
+    wr(['br'], ifFlush ? 'flush' : 'faded', [[430, PCSRC_Y], [430, REG.ifid.top]], ctl)
+  }
 
   wires.sort((a, b) => rank(a.look) - rank(b.look))
 
   // ---------- pipeline registers ----------
-  const bar = (key: keyof typeof REG, p: { instr: Instr; bubble?: boolean } | null, ctrl: Controls | null, parts: ('WB' | 'M' | 'EX')[], hold = false) => {
+  const bar = (key: keyof typeof REG, p: { instr: Instr; bubble?: boolean; squashed?: Squash } | null, ctrl: Controls | null, parts: ('WB' | 'M' | 'EX')[], hold = false) => {
     const r = REG[key]
-    const color = p ? (p.bubble ? '#868e96' : instrColor(p.instr)) : '#adb5bd'
+    const x = X(r.x)
+    const gone = p?.squashed
+    const color = p ? (gone ? COLORS.flush : p.bubble ? '#868e96' : instrColor(p.instr)) : '#adb5bd'
     const dataTop = r.top + parts.length * 40
-    const label = p ? (p.bubble ? 'bubble · controls = 0' : p.instr.text) : 'empty'
+    const label = p ? (gone ? goneText(gone) : p.bubble ? 'bubble · controls = 0' : p.instr.text) : 'empty'
+    const mid = (dataTop + BOTTOM) / 2
     return (
       <g key={key} opacity={op(BAR_GROUPS[key])}>
-        <rect x={r.x} y={dataTop} width={r.w} height={BOTTOM - dataTop} fill={p ? (p.bubble ? 'url(#pl-hatch)' : tint(color, '22')) : '#f8f9fa'}
+        <rect x={x} y={dataTop} width={r.w} height={BOTTOM - dataTop} fill={p ? (gone ? 'url(#pl-flush)' : p.bubble ? 'url(#pl-hatch)' : tint(color, '22')) : '#f8f9fa'}
           stroke={hold ? COLORS.hazard : '#343a40'} strokeWidth={hold ? 5 : 2.4} />
         {parts.map((part, i) => (
           <g key={part}>
-            <rect x={r.x} y={r.top + i * 40} width={r.w} height={40} fill={p ? 'white' : '#f8f9fa'} stroke={COLORS.ctrl} strokeWidth={2.2} />
-            <text x={r.x + r.w / 2} y={r.top + i * 40 + 15} fontFamily={FONT} fontSize={13} fill={COLORS.ctrl} textAnchor="middle">{part}</text>
-            {ctrl && values && <text x={r.x + r.w / 2} y={r.top + i * 40 + 33} fontFamily={MONO} fontSize={14} fontWeight={700} fill={p?.bubble ? COLORS.hazard : COLORS.ctrl} textAnchor="middle">{ctrlBits(ctrl, part, p?.bubble ? undefined : p?.instr.op)}</text>}
+            <rect x={x} y={r.top + i * 40} width={r.w} height={40} fill={p ? 'white' : '#f8f9fa'} stroke={COLORS.ctrl} strokeWidth={2.2} />
+            <text x={x + r.w / 2} y={r.top + i * 40 + 16} fontFamily={FONT} fontSize={14} fill={COLORS.ctrl} textAnchor="middle">{part}</text>
+            {ctrl && values && <text x={x + r.w / 2} y={r.top + i * 40 + 34} fontFamily={MONO} fontSize={part === 'M' && BR === 'mem' ? 13 : 15} fontWeight={700} fill={p?.bubble ? (gone ? COLORS.flush : COLORS.hazard) : COLORS.ctrl} textAnchor="middle">{ctrlBits(ctrl, part, p?.bubble ? undefined : p?.instr.op, BR === 'mem')}</text>}
           </g>
         ))}
-        <text x={r.x + r.w / 2 + 6} y={(dataTop + BOTTOM) / 2} transform={`rotate(-90 ${r.x + r.w / 2 + 6} ${(dataTop + BOTTOM) / 2})`} textAnchor="middle"
-          fontFamily={MONO} fontSize={19} fontWeight={700} fill={p ? color : '#adb5bd'}>{label}</text>
-        <text x={r.x + r.w / 2} y={r.top - 12} fontFamily={FONT} fontSize={20} fontWeight={700} textAnchor="middle" fill="#212529">{r.name}</text>
-        {p && !p.bubble && <g>
-          <circle cx={r.x + r.w / 2} cy={BOTTOM + 26} r={17} fill={color} />
-          <text x={r.x + r.w / 2} y={BOTTOM + 32} textAnchor="middle" fontFamily={FONT} fontSize={16} fontWeight={700} fill="white">I{p.instr.id + 1}</text>
+        <text x={x + r.w / 2 + 7} y={mid} transform={`rotate(-90 ${x + r.w / 2 + 7} ${mid})`} textAnchor="middle"
+          fontFamily={MONO} fontSize={22} fontWeight={700} fill={p ? color : '#adb5bd'}
+          textLength={label.length * 12.2 > BOTTOM - dataTop - 20 ? BOTTOM - dataTop - 20 : undefined} lengthAdjust="spacingAndGlyphs">{label}</text>
+        <text x={x + r.w / 2} y={r.top - 12} fontFamily={FONT} fontSize={22} fontWeight={700} textAnchor="middle" fill="#212529">{r.name}</text>
+        {p && !p.bubble && !gone && <g>
+          <circle cx={x + r.w / 2} cy={BOTTOM + 21} r={16} fill={color} />
+          <text x={x + r.w / 2} y={BOTTOM + 27} textAnchor="middle" fontFamily={FONT} fontSize={16} fontWeight={700} fill="white">I{p.instr.id + 1}</text>
         </g>}
-        {hold && <Tag x={r.x + r.w / 2} y={BOTTOM + 66} text="HOLD" color={COLORS.hazard} />}
+        {gone && <text x={x + r.w / 2} y={BOTTOM + 30} textAnchor="middle" fontFamily={FONT} fontSize={26} fontWeight={700} fill={COLORS.flush}>✕</text>}
+        {hold && <Tag x={x + r.w / 2} y={BOTTOM + 76} text="HOLD" color={COLORS.hazard} />}
       </g>
     )
   }
 
   // ---------- stage banners ----------
-  const stages: { name: string; x0: number; x1: number; who: Instr | null; bubble?: boolean; note?: string }[] = [
-    { name: 'IF', x0: 8, x1: 466, who: F, note: F ? (stall ? 'fetched again next cycle' : hex(c.fetch.pc, 4)) : 'no more instructions' },
-    { name: 'ID', x0: 510, x1: 1126, who: D, note: D && stall ? 'stalled: decoded again next cycle' : undefined },
-    { name: 'EX', x0: 1174, x1: 1706, who: idex?.instr ?? null, bubble: idex?.bubble },
-    { name: 'MEM', x0: 1754, x1: 2076, who: exmem?.instr ?? null, bubble: exmem?.bubble },
-    { name: 'WB', x0: 2124, x1: 2312, who: memwb?.instr ?? null, bubble: memwb?.bubble },
+  const sq = c.squash
+  const stages: { name: string; x0: number; x1: number; who: Instr | null; bubble?: boolean; gone?: Squash; note?: string; tone?: 'hazard' | 'flush' | 'branch' }[] = [
+    {
+      name: 'IF', x0: 8 - LEFT, x1: 394, who: F,
+      ...(F && sq?.ifid ? { note: sq.why === 'flush' ? 'wrong path: flushed at the edge' : 'thrown away: branch undecided', tone: 'flush' as const }
+        : { note: F ? (stall ? 'fetched again next cycle' : `address ${c.fetch.pc}`) : 'nothing left to fetch', tone: stall ? 'hazard' as const : undefined }),
+    },
+    {
+      name: 'ID', x0: 446, x1: BR === 'id' ? 994 + DX : 994, who: ifid?.instr ?? null, gone: ifid?.squashed,
+      ...(D && stall ? { note: idBranchWait ? 'branch waits: operands not ready' : 'stalled: decoded again next cycle', tone: 'hazard' as const }
+        : b?.at === 'id' ? { note: b.taken ? `taken → PC ← ${b.target}` : 'not taken', tone: 'branch' as const }
+          : sq?.idex ? { note: 'wrong path: ID.Flush', tone: 'flush' as const } : {}),
+    },
+    { name: 'EX', x0: X(1046), x1: X(1534), who: idex?.instr ?? null, bubble: idex?.bubble, gone: idex?.squashed, ...(sq?.exmem ? { note: 'wrong path: EX.Flush', tone: 'flush' as const } : {}) },
+    {
+      name: 'MEM', x0: X(1586), x1: X(1894), who: exmem?.instr ?? null, bubble: exmem?.bubble, gone: exmem?.squashed,
+      ...(b?.at === 'mem' ? { note: b.taken ? `taken → ${b.target}` : 'not taken', tone: 'branch' as const } : {}),
+    },
+    { name: 'WB', x0: X(1946), x1: X(2092), who: memwb?.instr ?? null, bubble: memwb?.bubble, gone: memwb?.squashed },
   ]
+  const toneColor = { hazard: COLORS.hazard, flush: COLORS.flush, branch: COLORS.branch }
 
+  const vbW = W + DX + DX2 + LEFT
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="pipeline-svg" role="img" aria-label={`Pipelined datapath with forwarding and hazard detection, clock cycle ${c.n}`}>
+    <svg viewBox={`${-LEFT} ${-TOP} ${vbW} ${H + TOP}`} className="pipeline-svg" style={{ minWidth: Math.round((1050 * vbW) / W) }} role="img"
+      aria-label={`Pipelined datapath with forwarding and hazard detection${BR ? `, branch decided in ${BR.toUpperCase()}` : ''}, clock cycle ${c.n}`}>
       <defs>
         <pattern id="pl-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <rect width="10" height="10" fill="#f1f3f5" />
           <line x1="0" y1="0" x2="0" y2="10" stroke="#ced4da" strokeWidth="5" />
         </pattern>
+        <pattern id="pl-flush" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+          <rect width="10" height="10" fill="#fff0f6" />
+          <line x1="0" y1="0" x2="0" y2="10" stroke="#fcc2d7" strokeWidth="5" />
+        </pattern>
       </defs>
-      <rect width={W} height={H} fill="white" />
+      <rect x={-LEFT} y={-TOP} width={vbW} height={H + TOP} fill="white" />
 
       {stages.map((s) => {
-        const color = s.who && !s.bubble ? instrColor(s.who) : '#868e96'
+        const y0 = 8 - TOP
+        const color = s.gone ? COLORS.flush : s.who && !s.bubble ? instrColor(s.who) : '#868e96'
+        const text = s.who ? (s.gone ? goneText(s.gone) : s.bubble ? 'bubble (nop)' : s.who.text) : '(empty)'
+        const room = s.x1 - s.x0 - 32
         return (
           <g key={s.name}>
-            <rect x={s.x0} y={8} width={s.x1 - s.x0} height={88} rx={10} fill={s.who ? (s.bubble ? 'url(#pl-hatch)' : tint(color)) : '#f8f9fa'} stroke={s.who ? color : '#dee2e6'} strokeWidth={2} />
-            <rect x={s.x0} y={8} width={10} height={88} rx={5} fill={s.who ? color : '#dee2e6'} />
-            <text x={s.x0 + 24} y={40} fontFamily={FONT} fontSize={22} fontWeight={700} fill={s.who ? color : '#adb5bd'}>
-              {s.name}{s.who && !s.bubble ? `  ·  I${s.who.id + 1}` : ''}
+            <rect x={s.x0} y={y0} width={s.x1 - s.x0} height={76} rx={10} fill={s.who ? (s.gone ? 'url(#pl-flush)' : s.bubble ? 'url(#pl-hatch)' : tint(color)) : '#f8f9fa'} stroke={s.who ? color : '#dee2e6'} strokeWidth={2} />
+            <rect x={s.x0} y={y0} width={10} height={76} rx={5} fill={s.who ? color : '#dee2e6'} />
+            <text x={s.x0 + 22} y={y0 + 29} fontFamily={FONT} fontSize={22} fontWeight={700} fill={s.who ? color : '#adb5bd'}>
+              {s.name}{s.who && !s.bubble && !s.gone ? `  ·  I${s.who.id + 1}` : ''}
             </text>
-            {(() => {
-              const text = s.who ? (s.bubble ? 'bubble (nop)' : s.who.text) : '(empty)'
-              const room = s.x1 - s.x0 - 34
-              return <text x={s.x0 + 24} y={74} fontFamily={MONO} fontSize={21} fontWeight={700} fill={s.who ? (s.bubble ? '#495057' : '#212529') : '#adb5bd'}
-                textLength={text.length * 11.6 > room ? room : undefined} lengthAdjust="spacingAndGlyphs">{text}</text>
-            })()}
-            {s.note && <text x={s.x1 - 12} y={40} fontFamily={FONT} fontSize={16} textAnchor="end" fill={stall && (s.name === 'IF' || s.name === 'ID') ? COLORS.hazard : '#495057'} fontWeight={stall ? 700 : 400}>{s.note}</text>}
-            {s.bubble && s.x1 - s.x0 > 400 && <text x={s.x1 - 12} y={40} fontFamily={FONT} fontSize={16} textAnchor="end" fill="#495057">all controls 0 · writes nothing</text>}
+            <text x={s.x0 + 22} y={y0 + 61} fontFamily={MONO} fontSize={22} fontWeight={700} fill={s.who ? (s.bubble || s.gone ? '#495057' : '#212529') : '#adb5bd'}
+              textLength={text.length * 12.2 > room ? room : undefined} lengthAdjust="spacingAndGlyphs">{text}</text>
+            {s.note && <text x={s.x1 - 12} y={y0 + 29} fontFamily={FONT} fontSize={17} textAnchor="end" fill={s.tone ? toneColor[s.tone] : '#495057'} fontWeight={s.tone ? 700 : 400}>{s.note}</text>}
+            {s.bubble && !s.gone && !s.note && s.x1 - s.x0 > 400 && <text x={s.x1 - 12} y={y0 + 29} fontFamily={FONT} fontSize={17} textAnchor="end" fill="#495057">all controls 0 · writes nothing</text>}
           </g>
         )
       })}
 
       {wires.map((x, i) => (
         <g key={i} opacity={op(x.g)}>
-          <Wire pts={x.pts} look={x.look} kind={x.kind} thick={x.thick} arrow={x.arrow ?? true} dots={x.dots} />
+          <Wire pts={x.raw ? x.pts : x.pts.map(([px, py]) => [X(px), py] as Pt)} look={x.look} kind={x.kind} thick={x.thick} arrow={x.arrow ?? true}
+            dots={x.raw ? x.dots : x.dots?.map(([px, py]) => [X(px), py] as Pt)} />
         </g>
       ))}
 
       {/* ---------- IF units ---------- */}
       <g opacity={op(['pc'])}>
-        <Box x={95} y={640} w={60} h={120} look={stall ? 'hazard' : 'normal'}>
-          <Label x={125} y={708} look={stall ? 'hazard' : 'normal'} bold anchor="middle" size={22}>PC</Label>
+        <Box x={60} y={560} w={60} h={140} look={stall ? 'hazard' : 'normal'}>
+          <Label x={90} y={638} look={stall ? 'hazard' : 'normal'} bold anchor="middle" size={24}>PC</Label>
         </Box>
       </g>
+      {BR && <g opacity={op(['pc', 'br'])}>
+        <Mux x={-120} y={560} w={40} h={140} top="0" bottom="1" look={c.pcSrc ? 'branch' : 'normal'} />
+      </g>}
       <g opacity={op(['if'])}>
-        <Box x={200} y={600} w={190} h={220} look={on(F)}>
-          <Label x={210} y={690} look={on(F)} size={17}>Read</Label>
-          <Label x={210} y={710} look={on(F)} size={17}>address</Label>
-          <Label x={382} y={690} look={on(F)} size={17} anchor="end">Instruction</Label>
-          <Label x={295} y={780} look={on(F)} size={19} bold anchor="middle">Instruction</Label>
-          <Label x={295} y={803} look={on(F)} size={19} bold anchor="middle">memory</Label>
+        <Box x={170} y={520} w={200} h={240} look={on(F)}>
+          <Label x={180} y={625} look={on(F)} size={19}>Read</Label>
+          <Label x={180} y={648} look={on(F)} size={19}>address</Label>
+          <Label x={362} y={646} look={on(F)} size={19} anchor="end">Instruction</Label>
+          <Label x={270} y={714} look={on(F)} size={22} bold anchor="middle">Instruction</Label>
+          <Label x={270} y={740} look={on(F)} size={22} bold anchor="middle">memory</Label>
         </Box>
-        <Adder lx={230} lt={380} lb={540} rx={320} rt={420} rb={500} look={on(F)}>
-          <Label x={284} y={468} look={on(F)} bold anchor="middle" size={19}>Add</Label>
+        <Adder lx={200} lt={345} lb={515} rx={300} rt={390} rb={470} look={on(F)}>
+          <Label x={260} y={438} look={on(F)} bold anchor="middle" size={22}>Add</Label>
         </Adder>
-        <Label x={183} y={518} look={on(F)} anchor="middle" size={20}>4</Label>
+        <Label x={168} y={492} look={on(F)} anchor="middle" size={22}>4</Label>
       </g>
 
       {/* ---------- ID units ---------- */}
       <g opacity={op(['id'])}>
-        <Oval cx={690} cy={385} rx={45} ry={65} lines={['Control']} look={on(D)} kind="ctrl" size={17} />
-        <Mux x={1040} y={325} w={40} h={130} top="0" bottom="1" look={on(D, stall ? 'hazard' : 'normal')} />
-        <Label x={1012} y={437} look={stall ? 'hazard' : 'faded'} kind="ctrl" anchor="end" size={20}>0</Label>
-        <Oval cx={765} cy={960} rx={50} ry={45} lines={['Sign-', 'extend']} look={on(D)} size={16} />
+        <Oval cx={660} cy={320} rx={50} ry={60} lines={['Control']} look={on(D)} kind="ctrl" size={19} />
+        <Mux x={910} y={270} w={40} h={120} top="0" bottom="1" look={on(D, stall ? 'hazard' : 'normal')} />
+        <Label x={879} y={372} look={asked ? 'hazard' : 'faded'} kind="ctrl" anchor="end" size={22}>0</Label>
+        <Oval cx={720} cy={900} rx={55} ry={40} lines={['Sign-', 'extend']} look={on(D)} size={17} />
       </g>
       <g opacity={op(['id', 'rf', 'wb'])}>
-        <Box x={640} y={560} w={250} h={300} look={on(D || Wb, phase === 'wb' && writes ? 'rf' : 'normal')}>
-          <Label x={650} y={605} look="normal" size={16}>Read register 1</Label>
-          <Label x={650} y={685} look="normal" size={16}>Read register 2</Label>
-          <Label x={650} y={765} look="normal" size={16}>Write register</Label>
-          <Label x={650} y={835} look="normal" size={16}>Write data</Label>
-          <Label x={882} y={625} look="normal" size={16} anchor="end">Read data 1</Label>
-          <Label x={882} y={825} look="normal" size={16} anchor="end">Read data 2</Label>
-          <Label x={810} y={725} look="normal" size={20} bold anchor="middle">Registers</Label>
+        <Box x={590} y={480} w={290} h={290} look={on(D || Wb, phase === 'wb' && writes ? 'rf' : 'normal')}>
+          <Label x={600} y={526} look="normal" size={19}>Read register 1</Label>
+          <Label x={600} y={596} look="normal" size={19}>Read register 2</Label>
+          <Label x={600} y={671} look="normal" size={19}>Write register</Label>
+          <Label x={600} y={746} look="normal" size={19}>Write data</Label>
+          <Label x={870} y={546} look="normal" size={19} anchor="end">Read data 1</Label>
+          <Label x={870} y={721} look="normal" size={19} anchor="end">Read data 2</Label>
+          <Label x={800} y={638} look="normal" size={23} bold anchor="middle">Registers</Label>
         </Box>
       </g>
       <g opacity={op(['hdu'])}>
-        <Oval cx={HDU.cx} cy={HDU.cy} rx={HDU.rx} ry={HDU.ry} lines={['Hazard', 'detection unit']} look={stall ? 'hazard' : 'normal'} kind="ctrl" size={18} />
+        <Oval cx={HDU.cx} cy={HDU.cy} rx={HDU.rx} ry={HDU.ry} lines={['Hazard', 'detection unit']} look={asked ? 'hazard' : 'normal'} kind="ctrl" size={21} />
       </g>
 
-      {/* ---------- EX units ---------- */}
-      <g opacity={op(['ex'])}>
-        <MuxN x={1290} y={590} w={50} h={150} inputs={[{ t: '00', y: 620 }, { t: '01', y: 665 }, { t: '10', y: 710 }]} look={on(E)} />
-        <MuxN x={1290} y={790} w={50} h={150} inputs={[{ t: '00', y: 820 }, { t: '01', y: 865 }, { t: '10', y: 910 }]} look={on(E && bUsed)} />
-        <Mux x={1400} y={835} w={36} h={100} top="0" bottom="1" look={on(E)} />
-        <Adder lx={1480} lt={600} lb={920} rx={1600} rt={690} rb={830} look={on(E)}>
-          <Label x={1545} y={752} look={on(E)} bold anchor="middle" size={21}>ALU</Label>
-          {E && ex && <Label x={1545} y={780} look="normal" anchor="middle" size={17}>{ex.aluCtl.name}</Label>}
+      {/* ---------- branch units ---------- */}
+      {BR === 'mem' && <g opacity={op(['ex', 'br'])}>
+        <Oval cx={1080} cy={820} rx={48} ry={28} lines={['Shift', 'left 2']} look={exBranch ? 'normal' : 'faded'} size={15} />
+        <Adder lx={1120} lt={400} lb={520} rx={1200} rt={430} rb={490} look={exBranch ? 'normal' : 'faded'}>
+          <Label x={1165} y={467} look={exBranch ? 'normal' : 'faded'} bold anchor="middle" size={20}>Add</Label>
         </Adder>
-        <Oval cx={1540} cy={975} rx={45} ry={35} lines={['ALU', 'control']} look={on(E)} kind="ctrl" size={14} />
-        <Mux x={1650} y={1040} w={36} h={90} top="0" bottom="1" look={on(E && E.ctrl.RegWrite)} />
+        <AndGate x={1888} y={398} w={46} h={54} look={M?.ctrl.Branch ? (taken ? 'branch' : 'normal') : 'faded'} />
+      </g>}
+      {BR === 'id' && <g opacity={op(['br', 'id'])}>
+        <MuxN x={1045} y={446} w={44} h={88} inputs={[{ t: '1', y: 470 }, { t: '0', y: 510 }]} look={idBranch && !idBranchWait ? (b?.fa?.sel ? 'exmem' : 'normal') : 'faded'} />
+        <MuxN x={1045} y={728} w={44} h={88} inputs={[{ t: '0', y: 750 }, { t: '1', y: 790 }]} look={idBranch && !idBranchWait ? (b?.fb?.sel ? 'exmem' : 'normal') : 'faded'} />
+        <ellipse cx={CMP.cx} cy={CMP.cy} rx={CMP.rx} ry={CMP.ry} fill="white" stroke={idBranchWait ? COLORS.hazard : b ? (b.equal ? COLORS.branch : COLORS.data) : COLORS.faded} strokeWidth={b ? 4.5 : 2.6} />
+        <text x={CMP.cx} y={CMP.cy + 14} textAnchor="middle" fontFamily={FONT} fontSize={40} fontWeight={700} fill={idBranchWait ? COLORS.hazard : b ? COLORS.data : COLORS.fadedText}>=</text>
+        <AndGate x={1240} y={600} w={48} h={54} look={idBranch ? (taken ? 'branch' : 'normal') : 'faded'} />
+        <Oval cx={1280} cy={850} rx={56} ry={26} lines={['Shift left 2']} look={idBranch ? 'normal' : 'faded'} size={15} />
+        <Adder lx={1360} lt={735} lb={875} rx={1425} rt={765} rb={845} look={idBranch ? (taken ? 'branch' : 'normal') : 'faded'}>
+          <Label x={1396} y={812} look={idBranch ? 'normal' : 'faded'} bold anchor="middle" size={20}>Add</Label>
+        </Adder>
+      </g>}
+
+      {/* ---------- EX units ---------- */}
+      <g opacity={op(['ex'])} transform={sh(1140)}>
+        <MuxN x={1140} y={505} w={50} h={140} inputs={[{ t: '00', y: 540 }, { t: '01', y: 578 }, { t: '10', y: 616 }]} look={on(E)} />
+        <MuxN x={1140} y={680} w={50} h={140} inputs={[{ t: '00', y: 715 }, { t: '01', y: 753 }, { t: '10', y: 791 }]} look={on(E && bUsed)} />
+        <Mux x={1270} y={715} w={36} h={110} top="0" bottom="1" look={on(E)} />
+        <Adder lx={1330} lt={480} lb={820} rx={1440} rt={570} rb={730} look={on(E)}>
+          <Label x={1392} y={660} look={on(E)} bold anchor="middle" size={24}>ALU</Label>
+          {E && ex && <Label x={1392} y={688} look="normal" anchor="middle" size={19}>{ex.aluCtl.name}</Label>}
+        </Adder>
+        <Oval cx={1385} cy={900} rx={50} ry={32} lines={['ALU', 'control']} look={on(E)} kind="ctrl" size={15} />
+        <Mux x={1480} y={925} w={36} h={110} top="0" bottom="1" look={on(E && E.ctrl.RegWrite)} />
       </g>
-      <g opacity={op(['fu'])}>
-        <Oval cx={FU.cx} cy={FU.cy} rx={FU.rx} ry={FU.ry} lines={['Forwarding', 'unit']} look={E && showFwd && (any10 || any01) ? (any10 ? 'exmem' : 'memwb') : on(E)} kind="ctrl" size={18} />
+      <g opacity={op(['fu'])} transform={sh(1290)}>
+        <Oval cx={FU.cx} cy={FU.cy} rx={FU.rx} ry={FU.ry} lines={['Forwarding', 'unit']} look={E && showFwd && (any10 || any01) ? (any10 ? 'exmem' : 'memwb') : on(E)} kind="ctrl" size={21} />
       </g>
 
       {/* ---------- MEM / WB units ---------- */}
-      <g opacity={op(['mem'])}>
-        <Box x={1850} y={700} w={170} h={260} look={on(memOp)}>
-          <Label x={1858} y={752} look={on(memOp)} size={16}>Address</Label>
-          <Label x={2012} y={752} look={on(memOp)} size={16} anchor="end">Read data</Label>
-          <Label x={1858} y={922} look={on(memOp)} size={16}>Write data</Label>
-          <Label x={1935} y={800} look={on(memOp)} size={19} bold anchor="middle">Data</Label>
-          <Label x={1935} y={823} look={on(memOp)} size={19} bold anchor="middle">memory</Label>
+      <g opacity={op(['mem'])} transform={sh(1690)}>
+        <Box x={1690} y={560} w={170} h={310} look={on(memOp)}>
+          <Label x={1698} y={642} look={on(memOp)} size={19}>Address</Label>
+          <Label x={1852} y={642} look={on(memOp)} size={19} anchor="end">Read</Label>
+          <Label x={1852} y={664} look={on(memOp)} size={19} anchor="end">data</Label>
+          <Label x={1698} y={838} look={on(memOp)} size={19}>Write data</Label>
+          <Label x={1775} y={722} look={on(memOp)} size={22} bold anchor="middle">Data</Label>
+          <Label x={1775} y={748} look={on(memOp)} size={22} bold anchor="middle">memory</Label>
         </Box>
       </g>
-      <g opacity={op(['wb'])}>
-        <Mux x={2200} y={735} w={40} h={130} top="1" bottom="0" look={on(Wb && Wb.ctrl.RegWrite)} />
+      <g opacity={op(['wb'])} transform={sh(1990)}>
+        <Mux x={1990} y={622} w={40} h={306} top="1" bottom="0" look={on(Wb && Wb.ctrl.RegWrite)} />
       </g>
 
-      {bar('ifid', ifid ? { instr: ifid.instr } : null, null, [], stall)}
+      {bar('ifid', ifid, null, [], stall)}
       {bar('idex', idex, idex?.ctrl ?? null, ['WB', 'M', 'EX'])}
       {bar('exmem', exmem, exmem?.ctrl ?? null, ['WB', 'M'])}
       {bar('memwb', memwb, memwb?.ctrl ?? null, ['WB'])}
 
       {/* ---------- signal names (as on the slides) ---------- */}
       <g opacity={op(['hdu', 'pc'])}>
-        <Halo x={118} y={470} rotate color={stall ? COLORS.hazard : COLORS.ctrl} bold={stall}>{`PCWrite${values && hz.checked ? ` = ${c.pcWrite}` : ''}`}</Halo>
-        <Halo x={481} y={262} rotate color={stall ? COLORS.hazard : COLORS.ctrl} bold={stall}>{`IF/IDWrite${values && hz.checked ? ` = ${c.ifidWrite}` : ''}`}</Halo>
-        <Halo x={1068} y={262} color={stall ? COLORS.hazard : COLORS.ctrl} bold={stall}>{`Stall${values && hz.checked ? ` = ${+stall}` : ''}`}</Halo>
-        <Halo x={1010} y={141}>ID/EX.RegisterRt</Halo>
-        <Halo x={1010} y={161}>ID/EX.MemRead</Halo>
-        <Halo x={553} y={330} rotate size={14} color="#212529">IF/ID.RegisterRs</Halo>
-        <Halo x={574} y={470} rotate size={14} color="#212529">IF/ID.RegisterRt</Halo>
+        <Halo x={83} y={405} rotate anchor="middle" color={stall ? COLORS.hazard : COLORS.ctrl} bold={stall}>{`PCWrite${values && hz.checked ? ` = ${c.pcWrite}` : ''}`}</Halo>
+        <Halo x={ifidWriteX - 8} y={137} anchor="end" color={stall ? COLORS.hazard : COLORS.ctrl} bold={stall}>{`IF/IDWrite${values && hz.checked ? ` = ${c.ifidWrite}` : ''}`}</Halo>
+        <Halo x={940} y={212} color={asked ? COLORS.hazard : COLORS.ctrl} bold={asked}>{`Stall${values && hz.checked ? ` = ${+asked}` : ''}`}</Halo>
+        <Halo x={X(1052)} y={108} size={16} anchor="end">{BR === 'id' ? 'ID/EX.MemRead, RegWrite' : 'ID/EX.MemRead'}</Halo>
+        <Halo x={X(1052)} y={134} size={16} anchor="end" color="#212529">{BR === 'id' ? 'ID/EX.RegisterRt, Rd, RegDst' : 'ID/EX.RegisterRt'}</Halo>
+        <Halo x={530} y={149} size={16} color="#212529">IF/ID.RegisterRs</Halo>
+        <Halo x={538} y={192} size={16} color="#212529">IF/ID.RegisterRt</Halo>
+        {BR === 'id' && <Halo x={X(1585)} y={62} size={16} anchor="end" color="#212529">EX/MEM.MemRead, RegisterRd (branch check, slides 80–81)</Halo>}
       </g>
       <g opacity={op(['id'])}>
-        <Halo x={545} y={952} size={14} color="#212529">[15–0]</Halo>
-        <Halo x={850} y={1029} size={15} color="#212529">{`IF/ID.RegisterRs${values && D ? ` = ${regName(D.rs)}` : ''}`}</Halo>
-        <Halo x={850} y={1059} size={15} color="#212529">{`IF/ID.RegisterRt${values && D ? ` = ${regName(D.rt)}` : ''}`}</Halo>
-        <Halo x={850} y={1099} size={15} color="#212529">{`IF/ID.RegisterRd${values && D ? ` = ${regName(D.rd)}` : ''}`}</Halo>
-        <Halo x={830} y={453} size={15} color="#212529">PC + 4</Halo>
+        <Halo x={480} y={892} size={16} color="#212529">[15–0]</Halo>
+        <Halo x={790} y={935} size={17} color="#212529">{`IF/ID.RegisterRs${values && D ? ` = ${regName(D.rs)}` : ''}`}</Halo>
+        <Halo x={790} y={960} size={17} color="#212529">{`IF/ID.RegisterRt${values && D ? ` = ${regName(D.rt)}` : ''}`}</Halo>
+        <Halo x={790} y={995} size={17} color="#212529">{`IF/ID.RegisterRd${values && D ? ` = ${regName(D.rd)}` : ''}`}</Halo>
+        <Halo x={896} y={422} size={17} color="#212529">PC + 4</Halo>
       </g>
-      <g opacity={op(['ex', 'fu'])}>
-        <Halo x={1426} y={826} size={15}>ALUSrc</Halo>
-        <Halo x={1568} y={1046} size={15}>ALUOp</Halo>
-        <Halo x={1662} y={1036} size={15} anchor="end">RegDst</Halo>
-        <Halo x={1362} y={792} size={16} bold={fa !== '00'} color={E && fa !== '00' ? COLORS[fwdLook(fa) as 'exmem'] : COLORS.ctrl}>{`ForwardA${values && E ? ` = ${fa}` : ''}`}</Halo>
-        <Halo x={1323} y={1004} size={16} bold={fb !== '00'} color={E && fb !== '00' ? COLORS[fwdLook(fb) as 'exmem'] : COLORS.ctrl}>{`ForwardB${values && E ? ` = ${fb}` : ''}`}</Halo>
-        <Halo x={1568} y={1163} size={14}>EX/MEM.RegWrite</Halo>
-        <Halo x={1568} y={1195} size={14} color="#212529">EX/MEM.RegisterRd</Halo>
-        <Halo x={1568} y={1227} size={14}>MEM/WB.RegWrite</Halo>
-        <Halo x={1500} y={1284} size={14} color="#212529">MEM/WB.RegisterRd</Halo>
-        <Halo x={1258} y={1264} size={14} color={any10 && showFwd ? COLORS.exmem : '#868e96'}>EX/MEM.ALUResult → 10</Halo>
-        <Halo x={1258} y={1314} size={14} color={any01 && showFwd ? COLORS.memwb : '#868e96'}>MEM/WB value → 01</Halo>
+      <g opacity={op(['ex', 'fu'])} transform={sh(1160)}>
+        <Halo x={1280} y={706} size={17} anchor="end">ALUSrc</Halo>
+        <Halo x={1453} y={800} size={17} rotate anchor="middle">ALUOp</Halo>
+        <Halo x={1491} y={800} size={17} rotate anchor="middle">RegDst</Halo>
+        <Halo x={1212} y={1050} size={18} bold={fa !== '00'} color={E && fa !== '00' ? COLORS[fwdLook(fa) as 'exmem'] : COLORS.ctrl}>{`ForwardA${values && E ? ` = ${fa}` : ''}`}</Halo>
+        <Halo x={1157} y={1064} size={17} anchor="end" bold={fb !== '00'} color={E && fb !== '00' ? COLORS[fwdLook(fb) as 'exmem'] : COLORS.ctrl}>{`ForwardB${values && E ? ` = ${fb}` : ''}`}</Halo>
+        <Halo x={1440} y={1074} size={16}>EX/MEM.RegWrite</Halo>
+        <Halo x={1440} y={1099} size={16} color="#212529">EX/MEM.RegisterRd</Halo>
+        <Halo x={1440} y={1124} size={16}>MEM/WB.RegWrite</Halo>
+        <Halo x={1400} y={1189} size={16} color="#212529">MEM/WB.RegisterRd</Halo>
+        <Halo x={1160} y={1216} size={16} color={(any10 && showFwd) || busCmp ? COLORS.exmem : '#868e96'}>{BR === 'id' ? 'EX/MEM.ALUResult → 10 and → comparator' : 'EX/MEM.ALUResult → 10'}</Halo>
+        <Halo x={1160} y={1272} size={16} color={any01 && showFwd ? COLORS.memwb : '#868e96'}>MEM/WB value → 01</Halo>
       </g>
-      <g opacity={op(['mem'])}>
-        <Halo x={1924} y={560} rotate size={15}>MemWrite</Halo>
-        <Halo x={2034} y={600} rotate size={15}>MemRead</Halo>
+      <g opacity={op(['mem'])} transform={sh(1740)}>
+        <Halo x={1733} y={470} rotate size={17} anchor="middle">MemWrite</Halo>
+        <Halo x={1803} y={470} rotate size={17} anchor="middle">MemRead</Halo>
       </g>
       <g opacity={op(['wb', 'rf'])}>
-        <Halo x={2214} y={620} rotate size={15}>MemtoReg</Halo>
-        <Halo x={1500} y={284} size={15}>RegWrite</Halo>
+        <Halo x={X(2003)} y={500} rotate size={17} anchor="middle">MemtoReg</Halo>
+        <Halo x={X(1480)} y={231} size={17}>RegWrite</Halo>
       </g>
+      {BR && <g opacity={op(['br', 'pc'])}>
+        <Halo x={-100} y={PCSRC_Y - 8} size={17} color={c.pcSrc ? COLORS.branch : COLORS.ctrl} bold={!!c.pcSrc}>{`PCSrc${values && (b || c.waiting) ? ` = ${c.pcSrc}` : ''}`}</Halo>
+        <Halo x={-180} y={TARGET_Y - 8} size={17} color={taken ? COLORS.branch : '#212529'} bold={taken}>{`Branch target${values && b ? ` = ${b.target}` : ''}`}</Halo>
+        <Halo x={438} y={PCSRC_Y + 50} size={17} color={ifFlush ? COLORS.flush : COLORS.ctrl} bold={ifFlush}>{`IF.Flush${values && (b || c.waiting) ? ` = ${+ifFlush}` : ''}`}</Halo>
+        {BR === 'mem' && <>
+          <Halo x={1028} y={PCSRC_Y + 50} size={17} color={flushing && c.at.ifid ? COLORS.flush : COLORS.ctrl} bold={flushing}>ID.Flush</Halo>
+          <Halo x={X(1560) + 8} y={PCSRC_Y + 50} size={17} color={flushing && c.at.idex ? COLORS.flush : COLORS.ctrl} bold={flushing}>EX.Flush</Halo>
+          <Halo x={1840} y={384 - 6} size={15} anchor="end">Branch</Halo>
+          <Halo x={1848} y={603} size={15} anchor="end" color="#212529">Zero</Halo>
+          <Halo x={X(1446)} y={603} size={15} color="#212529">Zero</Halo>
+          <Halo x={1215} y={452} size={15} color="#212529">target</Halo>
+        </>}
+        {BR === 'id' && <>
+          <Halo x={1218} y={392} size={15}>Branch</Halo>
+          <Halo x={1200} y={664} size={15} color="#212529">Equal</Halo>
+          <Halo x={1040} y={442} size={14} anchor="middle" color={b?.fa?.sel ? COLORS.exmem : COLORS.ctrl}>{`ForwardC${values && b?.fa ? ` = ${b.fa.sel}` : ''}`}</Halo>
+          <Halo x={1040} y={832} size={14} anchor="middle" color={b?.fb?.sel ? COLORS.exmem : COLORS.ctrl}>{`ForwardD${values && b?.fb ? ` = ${b.fb.sel}` : ''}`}</Halo>
+        </>}
+      </g>}
 
       {/* ---------- bubble markers (slide 71: "make all control fields 0") ---------- */}
-      {idex?.bubble && <g opacity={op(['ex'])}><Tag x={1440} y={540} text="bubble: EX, MEM, WB do nothing" color="#868e96" /></g>}
-      {exmem?.bubble && <g opacity={op(['mem'])}><Tag x={1935} y={655} text="bubble" color="#868e96" /></g>}
-      {memwb?.bubble && <g opacity={op(['wb'])}><Tag x={2215} y={690} text="bubble" color="#868e96" /></g>}
+      {(idex?.bubble || idex?.squashed) && <g opacity={op(['ex'])}><Tag x={X(1290)} y={455} text={idex.squashed ? (idex.bubble ? 'flushed: EX, MEM, WB do nothing' : 'nop left by IF.Flush: does nothing') : 'bubble: EX, MEM, WB do nothing'} color={idex.squashed ? COLORS.flush : '#868e96'} /></g>}
+      {(exmem?.bubble || exmem?.squashed) && <g opacity={op(['mem'])}><Tag x={X(1775)} y={530} text={exmem.squashed ? 'flushed' : 'bubble'} color={exmem.squashed ? COLORS.flush : '#868e96'} /></g>}
+      {(memwb?.bubble || memwb?.squashed) && <g opacity={op(['wb'])}><Tag x={X(2010)} y={600} text={memwb.squashed ? 'flushed' : 'bubble'} color={memwb.squashed ? COLORS.flush : '#868e96'} /></g>}
 
       {/* ---------- values ---------- */}
-      {show(['pc']) && <Tag x={125} y={796} text={`PC = ${c.at.pc}`} color={stall ? COLORS.hazard : '#212529'} />}
+      {show(['pc']) && <Tag x={90} y={732} text={`PC = ${c.at.pc}`} color={stall ? COLORS.hazard : '#212529'} />}
+      {BR && show(['pc', 'br']) && (b || c.waiting) && <Tag x={-100} y={760} text={`next PC = ${c.next.pc}`} color={c.pcSrc ? COLORS.branch : '#212529'} />}
       {show(['if']) && F && <>
-        <Tag x={295} y={856} text={hex(F.word)} />
-        <Tag x={405} y={448} text={`${c.fetch.pc4}`} />
+        <Tag x={270} y={795} text={hex(F.word)} />
+        <Tag x={365} y={420} text={`${c.fetch.pc4}`} />
       </>}
       {show(['id']) && D && c.id && <>
-        <Tag x={1010} y={608} text={`${regName(D.rs)} = ${c.id.data1}`} color={c.id.sameCycleRs ? COLORS.rf : '#212529'} />
-        <Tag x={1010} y={808} text={`${regName(D.rt)} = ${c.id.data2}`} color={c.id.sameCycleRt ? COLORS.rf : '#212529'} />
-        <Tag x={975} y={948} text={`${D.imm}`} />
-        <Tag x={900} y={373} text={stall ? 'controls → 0' : `${ctrlBits(c.id.ctrl, 'WB', D.op)} ${ctrlBits(c.id.ctrl, 'M')} ${ctrlBits(c.id.ctrl, 'EX', D.op)}`} color={stall ? COLORS.hazard : COLORS.ctrl} />
+        <Tag x={940} y={530} text={`${regName(D.rs)} = ${c.id.data1}`} color={c.id.sameCycleRs ? COLORS.rf : '#212529'} />
+        <Tag x={940} y={705} text={`${regName(D.rt)} = ${c.id.data2}`} color={c.id.sameCycleRt ? COLORS.rf : '#212529'} />
+        <Tag x={888} y={890} text={`${D.imm}`} />
+        <Tag x={716} y={290} anchor="start" text={`${ctrlBits(c.id.ctrl, 'WB', D.op)} ${ctrlBits(c.id.ctrl, 'M', undefined, BR === 'mem')} ${ctrlBits(c.id.ctrl, 'EX', D.op)}`} color={COLORS.ctrl} />
       </>}
       {show(['hdu']) && hz.checked && (
-        <Tag x={HDU.cx} y={262} color={stall ? COLORS.hazard : COLORS.ctrl}
-          text={!hz.memRead ? 'ID/EX.MemRead = 0 → no stall' : stall ? `MemRead=1, ${regName(hz.idexRt)} = ${regName(hz.matchRs ? hz.ifidRs : hz.ifidRt)} → STALL` : `MemRead=1, ${regName(hz.idexRt)} ≠ rs, rt → no stall`} />
+        <Tag x={HDU.cx} y={218} color={asked ? COLORS.hazard : COLORS.ctrl}
+          text={hz.branch?.stall && !hz.loadUse ? `branch needs ${regName(hz.branch.aluRs || hz.branch.loadRs ? D!.rs : D!.rt)} → STALL`
+            : !hz.memRead ? (hz.branch ? 'operands ready → no stall' : 'MemRead = 0 → no stall')
+              : hz.loadUse ? `lw rt ${regName(hz.idexRt)} = ${hz.matchRs ? 'rs' : 'rt'} → STALL` : `lw rt ${regName(hz.idexRt)} ≠ rs, rt → no stall`} />
       )}
-      {show(['rf']) && phase === 'wb' && writes && c.wb && <Tag x={775} y={548} anchor="start" color={COLORS.rf} text={`1st half: ${regName(c.wb.rd)} ← ${c.wb.value}`} />}
-      {show(['rf']) && phase === 'id' && D && c.id && <Tag x={775} y={548} anchor="start" color={COLORS.rf} text={`2nd half: read ${regName(D.rs)}, ${regName(D.rt)}`} />}
-      {showFwd && E && ex && ex.fa.double && <g opacity={op(['fu'])}><Tag x={1284} y={650} anchor="end" text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
-      {showFwd && E && ex && ex.fb.double && <g opacity={op(['fu'])}><Tag x={1284} y={850} anchor="end" text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
-      {show(['ex']) && E && ex && <>
-        <Tag x={1410} y={652} text={`${ex.aluA}`} color={fa === '00' ? '#212529' : COLORS[fwdLook(fa) as 'exmem']} />
-        <Tag x={1458} y={985 - 70} text={`${ex.aluB}`} />
-        <Tag x={1655} y={748} text={`${ex.result}`} />
-        {E.ctrl.MemWrite ? <Tag x={1650} y={922} text={`${ex.writeData}`} color={fb === '00' ? '#212529' : COLORS[fwdLook(fb) as 'exmem']} /> : null}
-        {E.ctrl.RegWrite ? <Tag x={1598} y={1140} text={`dest ${regName(ex.regDst)}`} /> : null}
+      {show(['rf']) && phase === 'wb' && writes && c.wb && <Tag x={600} y={468} anchor="start" color={COLORS.rf} text={`1st half: ${regName(c.wb.rd)} ← ${c.wb.value}`} />}
+      {show(['rf']) && phase === 'id' && D && c.id && <Tag x={600} y={468} anchor="start" color={COLORS.rf} text={`2nd half: read ${regName(D.rs)}, ${regName(D.rt)}`} />}
+      {showFwd && E && ex && ex.fa.double && <g opacity={op(['fu'])}><Tag x={X(1165)} y={494} text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
+      {showFwd && E && ex && ex.fb.double && <g opacity={op(['fu'])}><Tag x={X(1094)} y={741} anchor="end" text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
+      {show(['ex']) && E && ex && <g transform={sh(1300)}>
+        <Tag x={1248} y={563} text={`${ex.aluA}`} color={fa === '00' ? '#212529' : COLORS[fwdLook(fa) as 'exmem']} />
+        <Label x={1392} y={605} look="normal" anchor="middle" size={18}>{`A = ${ex.aluA}`}</Label>
+        <Label x={1386} y={735} look="normal" anchor="middle" size={18}>{`B = ${ex.aluB}`}</Label>
+        <Tag x={1492} y={638} text={`${ex.result}`} />
+        {E.ctrl.MemWrite ? <Tag x={1400} y={833} text={`${ex.writeData}`} color={fb === '00' ? '#212529' : COLORS[fwdLook(fb) as 'exmem']} /> : null}
+        {E.ctrl.RegWrite ? <Tag x={1474} y={990} anchor="end" text={`dest ${regName(ex.regDst)}`} /> : null}
+      </g>}
+      {show(['ex', 'br']) && exBranch && ex && <>
+        <Tag x={1160} y={380} text={`target ${ex.target}`} color={COLORS.branch} />
+        <Tag x={X(1490)} y={598} text={`Zero = ${ex.zero}`} color={COLORS.branch} />
       </>}
-      {show(['mem']) && M && c.mem && <>
-        <Label x={1935} y={862} look="normal" anchor="middle" size={16}>{`Mem[${c.mem.address}]`}</Label>
-        <Label x={1935} y={884} look={c.mem.read ? 'normal' : 'exmem'} anchor="middle" size={16} bold>{c.mem.read ? `read ${c.mem.readData}` : `← ${M.writeData} at edge`}</Label>
-      </>}
-      {show(['wb']) && Wb && c.wb && Wb.ctrl.RegWrite ? <Tag x={2262} y={930} text={`${c.wb.value}`} color={phase === 'wb' ? COLORS.rf : '#212529'} /> : null}
+      {show(['br']) && BR === 'mem' && M?.ctrl.Branch ? <Tag x={1911} y={490} text={`PCSrc = ${c.pcSrc}`} color={taken ? COLORS.branch : '#212529'} /> : null}
+      {show(['br', 'id']) && BR === 'id' && idBranch && (idBranchWait
+        ? <Tag x={CMP.cx} y={712} text="waits" color={COLORS.hazard} />
+        : b && <>
+          <Tag x={1063} y={565} text={`${b.a}`} color={b.fa?.sel ? COLORS.exmem : '#212529'} />
+          <Tag x={1063} y={700} text={`${b.b}`} color={b.fb?.sel ? COLORS.exmem : '#212529'} />
+          <Tag x={1264} y={690} text={b.equal ? 'equal' : 'not equal'} color={b.equal ? COLORS.branch : '#212529'} />
+          <Tag x={1392} y={720} text={`${b.target}`} color={taken ? COLORS.branch : '#212529'} />
+        </>)}
+      {show(['mem']) && M && c.mem && <g transform={sh(1775)}>
+        <Label x={1775} y={784} look="normal" anchor="middle" size={18}>{`Mem[${c.mem.address}]`}</Label>
+        <Label x={1775} y={807} look={c.mem.read ? 'normal' : 'exmem'} anchor="middle" size={18} bold>{c.mem.read ? `read ${c.mem.readData}` : `← ${M.writeData} at edge`}</Label>
+      </g>}
+      {show(['wb']) && Wb && c.wb && Wb.ctrl.RegWrite ? <Tag x={X(2065)} y={1000} anchor="end" text={`${c.wb.value}`} color={phase === 'wb' ? COLORS.rf : '#212529'} /> : null}
     </svg>
   )
 }

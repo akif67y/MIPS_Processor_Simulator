@@ -1,0 +1,430 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Branch-in-ID Pipelined Datapath</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: one wide schematic sheet in a scroll frame, notes below in a narrow reading column */
+:root{
+  --bg:#f6f7f9; --sheet:#ffffff; --ink:#1d2430; --muted:#5d6676; --rule:#d9dde4;
+  --unit:#eef1f5; --reg:#dfe4ec; --ctrl:#2563b0; --acc:#c2410c; --acc-soft:#fde9de;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --sheet:#181d26; --ink:#dfe5ee; --muted:#9aa4b4; --rule:#2c3442;
+  --unit:#212836; --reg:#2b3446; --ctrl:#6ea8f0; --acc:#fb8c4f; --acc-soft:#3a2418; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --sheet:#181d26; --ink:#dfe5ee; --muted:#9aa4b4; --rule:#2c3442;
+  --unit:#212836; --reg:#2b3446; --ctrl:#6ea8f0; --acc:#fb8c4f; --acc-soft:#3a2418; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1560px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--f-display);font-weight:600;font-size:clamp(22px,3.2vw,30px);line-height:1.15;margin:0;text-wrap:balance}
+.sub{color:var(--muted);margin:4px 0 0;max-width:70ch}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+button{font:500 13px var(--f-body);color:var(--ink);background:var(--sheet);border:1px solid var(--rule);border-radius:6px;padding:7px 12px;cursor:pointer}
+button[aria-pressed="true"]{border-color:var(--acc);color:var(--acc);background:var(--acc-soft)}
+button:focus-visible{outline:2px solid var(--ctrl);outline-offset:2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.legend i{display:inline-block;width:26px;height:0;border-top:2px solid var(--ink)}
+.legend i.c{border-color:var(--ctrl)} .legend i.a{border-color:var(--acc);border-top-width:3px}
+.frame{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.frame svg{display:block;width:1510px;max-width:none;height:auto}
+.frame.fit svg{width:100%}
+.hint{font-size:12.5px;color:var(--muted);margin:-8px 0 0}
+svg text{font-family:var(--f-body);font-size:12px;fill:var(--ink)}
+svg .t{font-family:var(--f-display);font-weight:500;font-size:14px}
+svg .s{font-size:11px;fill:var(--muted)}
+svg .m{font-family:var(--f-mono);font-size:11px;fill:var(--muted)}
+svg .stage{font-family:var(--f-display);font-weight:600;font-size:15px;fill:var(--muted);letter-spacing:.06em}
+svg .cl{font-family:var(--f-mono);font-size:11px;fill:var(--ctrl)}
+svg .al{font-family:var(--f-mono);font-size:11px;fill:var(--acc)}
+svg .w{fill:none;stroke:var(--ink);stroke-width:1.4}
+svg .c{fill:none;stroke:var(--ctrl);stroke-width:1.4}
+svg .a{fill:none;stroke:var(--acc);stroke-width:2.2}
+svg .u{fill:var(--unit);stroke:var(--ink);stroke-width:1.2}
+svg .ua{fill:var(--acc-soft);stroke:var(--acc);stroke-width:2}
+svg .r{fill:var(--reg);stroke:var(--ink);stroke-width:1.2}
+svg .dot{fill:var(--ink)} svg .dota{fill:var(--acc)}
+svg .badge circle{fill:var(--acc)} svg .badge text{fill:var(--sheet);font:600 11px var(--f-display);text-anchor:middle;dominant-baseline:central}
+svg .ex{display:none} svg.show-ex .ex{display:inline}
+svg .exv{font-family:var(--f-mono);font-size:12px;font-weight:500;fill:var(--acc)}
+#mk-w path{fill:var(--ink)} #mk-c path{fill:var(--ctrl)} #mk-a path{fill:var(--acc)}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:18px}
+.card{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;min-width:0}
+.card h2{font-family:var(--f-display);font-weight:600;font-size:17px;margin:0 0 8px}
+.card ol,.card ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.card p{margin:0 0 8px}
+code{font-family:var(--f-mono);font-size:.9em;background:var(--unit);padding:1px 4px;border-radius:4px}
+.k{color:var(--acc);font-weight:500}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header>
+  <div>
+    <h1>Pipelined datapath with branch resolved in ID</h1>
+    <p class="sub">Five-stage MIPS pipeline with forwarding, load-use hazard detection, and the four pieces of hardware that move the <code>beq</code> decision from MEM into ID (slide 78, "Reducing Branch Delay").</p>
+  </div>
+  <div class="controls">
+    <button id="btn-ex" type="button" aria-pressed="false">Show slide 78 example</button>
+    <button id="btn-fit" type="button" aria-pressed="false">Fit to screen</button>
+  </div>
+</header>
+
+<div class="legend" aria-label="Legend">
+  <span><i></i>Data and register numbers</span>
+  <span><i class="c"></i>Control signals</span>
+  <span><i class="a"></i>Added for branch in ID</span>
+</div>
+
+<div class="frame" id="frame">
+<svg id="dp" viewBox="0 0 1510 900" role="img" aria-labelledby="dp-title dp-desc">
+<title id="dp-title">MIPS pipelined datapath with branch decision in the ID stage</title>
+<desc id="dp-desc">PC, instruction memory and PC+4 adder in IF; registers, control, hazard detection unit, sign extend, shift left 2, branch target adder and equality comparator in ID; forwarding muxes, ALU, RegDst mux and forwarding unit in EX; data memory in MEM; MemtoReg mux in WB. IF.Flush clears IF/ID when the branch is taken.</desc>
+<defs>
+  <marker id="mk-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1L10 5L0 9z"/></marker>
+  <marker id="mk-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1L10 5L0 9z"/></marker>
+  <marker id="mk-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 1L10 5L0 9z"/></marker>
+</defs>
+
+<!-- stage names -->
+<text class="stage" x="165" y="28" text-anchor="middle">IF</text>
+<text class="stage" x="520" y="28" text-anchor="middle">ID</text>
+<text class="stage" x="920" y="28" text-anchor="middle">EX</text>
+<text class="stage" x="1250" y="28" text-anchor="middle">MEM</text>
+<text class="stage" x="1450" y="28" text-anchor="middle">WB</text>
+
+<!-- ===== wires: IF ===== -->
+<path class="w" d="M60 450H80" marker-end="url(#mk-w)"/>
+<path class="w" d="M110 450H140" marker-end="url(#mk-w)"/>
+<path class="w" d="M125 450V305H150" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="125" cy="450" r="3"/>
+<path class="w" d="M141 335H150" marker-end="url(#mk-w)"/>
+<text x="136" y="339" text-anchor="end" class="m">4</text>
+<path class="w" d="M190 320H300" marker-end="url(#mk-w)"/>
+<path class="w" d="M230 320V380H28V435H40" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="230" cy="320" r="3"/>
+<path class="w" d="M260 470H300" marker-end="url(#mk-w)"/>
+
+<!-- branch target back to PC mux (added) -->
+<path class="a" d="M680 340H695V255H14V465H40" marker-end="url(#mk-a)"/>
+<!-- PCSrc from AND gate (added) -->
+<path class="a" d="M645 135H50V420" marker-end="url(#mk-a)"/>
+<text class="al" x="560" y="129">PCSrc</text>
+
+<!-- hazard unit outputs -->
+<path class="c" d="M380 70H95V410" marker-end="url(#mk-c)"/>
+<text class="cl" x="200" y="64">PCWrite</text>
+<path class="c" d="M380 90H305V270" marker-end="url(#mk-c)"/>
+<text class="cl" x="312" y="84">IF/IDWrite</text>
+
+<!-- IF.Flush (added) -->
+<path class="a" d="M495 181V150H315V270" marker-end="url(#mk-a)"/>
+<text class="al" x="410" y="166">IF.Flush</text>
+
+<!-- ===== wires: ID ===== -->
+<path class="w" d="M320 320H640" marker-end="url(#mk-w)"/>
+<path class="w" d="M320 470H360"/>
+<path class="w" d="M360 125V740"/>
+<path class="w" d="M360 125H400V110" marker-end="url(#mk-w)"/>
+<text class="m" x="404" y="122">IF/ID.Rs, Rt</text>
+<path class="w" d="M360 205H467" marker-end="url(#mk-w)"/>
+<text class="m" x="366" y="199">[31-26]</text>
+<path class="w" d="M360 440H420" marker-end="url(#mk-w)"/>
+<text class="m" x="366" y="434">[25-21]</text>
+<path class="w" d="M360 490H420" marker-end="url(#mk-w)"/>
+<text class="m" x="366" y="484">[20-16]</text>
+<path class="w" d="M360 640H446" marker-end="url(#mk-w)"/>
+<text class="m" x="364" y="634">[15-0]</text>
+<path class="w" d="M360 690H720" marker-end="url(#mk-w)"/>
+<text class="m" x="616" y="684">Rs [25-21]</text>
+<path class="w" d="M360 715H720" marker-end="url(#mk-w)"/>
+<text class="m" x="616" y="709">Rt [20-16]</text>
+<path class="w" d="M360 740H720" marker-end="url(#mk-w)"/>
+<text class="m" x="616" y="734">Rd [15-11]</text>
+<circle class="dot" cx="360" cy="205" r="3"/><circle class="dot" cx="360" cy="440" r="3"/>
+<circle class="dot" cx="360" cy="470" r="3"/><circle class="dot" cx="360" cy="490" r="3"/>
+<circle class="dot" cx="360" cy="640" r="3"/><circle class="dot" cx="360" cy="690" r="3"/>
+<circle class="dot" cx="360" cy="715" r="3"/>
+
+<!-- register outputs -->
+<path class="w" d="M560 440H720" marker-end="url(#mk-w)"/>
+<path class="w" d="M560 530H720" marker-end="url(#mk-w)"/>
+<!-- comparator inputs and output (added) -->
+<path class="a" d="M590 440V472H615" marker-end="url(#mk-a)"/>
+<path class="a" d="M600 530V498H615" marker-end="url(#mk-a)"/>
+<circle class="dota" cx="590" cy="440" r="3.5"/><circle class="dota" cx="600" cy="530" r="3.5"/>
+<path class="a" d="M649 485H712V127H680" marker-end="url(#mk-a)"/>
+<!-- sign extend out, shift, adder (added parts) -->
+<path class="w" d="M514 640H720" marker-end="url(#mk-w)"/>
+<path class="a" d="M575 640V376" marker-end="url(#mk-a)"/>
+<circle class="dota" cx="575" cy="640" r="3.5"/>
+<path class="a" d="M611 360H640" marker-end="url(#mk-a)"/>
+
+<!-- control path through stall mux -->
+<path class="c" d="M543 205H575V192H600" marker-end="url(#mk-c)"/>
+<text class="m" x="583" y="232">0</text>
+<path class="c" d="M591 228H600" marker-end="url(#mk-c)"/>
+<path class="c" d="M620 210H660M660 185V245"/>
+<path class="c" d="M660 185H720" marker-end="url(#mk-c)"/>
+<path class="c" d="M660 215H720" marker-end="url(#mk-c)"/>
+<path class="c" d="M660 245H720" marker-end="url(#mk-c)"/>
+<circle cx="660" cy="210" r="3" fill="var(--ctrl)"/>
+<!-- Branch control to AND -->
+<path class="c" d="M520 183V160H700V143H680" marker-end="url(#mk-c)"/>
+<text class="cl" x="626" y="155">Branch</text>
+<!-- stall mux select -->
+<path class="c" d="M540 100H610V178" marker-end="url(#mk-c)"/>
+<!-- hazard unit inputs -->
+<path class="c" d="M730 170V62H540" marker-end="url(#mk-c)"/>
+<text class="cl" x="560" y="56">ID/EX.MemRead</text>
+<path class="w" d="M750 715V88H540" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="750" cy="715" r="3"/>
+<text class="m" x="560" y="82">ID/EX.RegisterRt</text>
+
+<!-- ===== wires: EX ===== -->
+<path class="w" d="M740 440H830" marker-end="url(#mk-w)"/>
+<path class="w" d="M740 530H830" marker-end="url(#mk-w)"/>
+<path class="w" d="M740 640H895V605H910" marker-end="url(#mk-w)"/>
+<path class="w" d="M850 460H960" marker-end="url(#mk-w)"/>
+<path class="w" d="M850 555H910" marker-end="url(#mk-w)"/>
+<path class="w" d="M880 555V670H1100" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="880" cy="555" r="3"/>
+<path class="w" d="M930 580H960" marker-end="url(#mk-w)"/>
+<path class="w" d="M1020 520H1100" marker-end="url(#mk-w)"/>
+<path class="w" d="M740 690H765V785H835" marker-end="url(#mk-w)"/>
+<path class="w" d="M780 715V800H835" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="780" cy="715" r="3"/>
+<path class="w" d="M740 715H940V705H960" marker-end="url(#mk-w)"/>
+<path class="w" d="M740 740H950V745H960" marker-end="url(#mk-w)"/>
+<path class="w" d="M980 725H1100" marker-end="url(#mk-w)"/>
+<text class="s" x="752" y="250">EX: ALUSrc, ALUOp, RegDst</text>
+<!-- forwarding selects -->
+<path class="c" d="M862 775V508H840V500" marker-end="url(#mk-c)"/>
+<path class="c" d="M840 775V595" marker-end="url(#mk-c)"/>
+<text class="cl" x="866" y="764">ForwardA</text>
+<text class="cl" x="836" y="764" text-anchor="end">ForwardB</text>
+<!-- EX/MEM forwarding value -->
+<path class="w" d="M1140 520V395H810V580H830" marker-end="url(#mk-w)"/>
+<path class="w" d="M810 480H830" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="1140" cy="520" r="3"/><circle class="dot" cx="810" cy="480" r="3"/>
+<!-- MEM/WB forwarding value (from write-back) -->
+<path class="w" d="M795 850V460H830" marker-end="url(#mk-w)"/>
+<path class="w" d="M795 555H830" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="795" cy="850" r="3"/><circle class="dot" cx="795" cy="555" r="3"/>
+
+<!-- control fields along the pipe -->
+<path class="c" d="M740 185H1100" marker-end="url(#mk-c)"/>
+<path class="c" d="M740 215H1100" marker-end="url(#mk-c)"/>
+<path class="c" d="M1120 185H1380" marker-end="url(#mk-c)"/>
+<path class="c" d="M1120 215H1290V490" marker-end="url(#mk-c)"/>
+<text class="cl" x="1296" y="330">MemRead</text>
+<text class="cl" x="1296" y="345">MemWrite</text>
+<path class="c" d="M1400 185H1450V500" marker-end="url(#mk-c)"/>
+<text class="cl" x="1456" y="330">MemtoReg</text>
+<text class="cl" x="1404" y="168">RegWrite</text>
+
+<!-- ===== wires: MEM / WB ===== -->
+<path class="w" d="M1120 520H1180" marker-end="url(#mk-w)"/>
+<path class="w" d="M1160 520V650H1380" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="1160" cy="520" r="3"/>
+<path class="w" d="M1120 670H1170V600H1180" marker-end="url(#mk-w)"/>
+<path class="w" d="M1320 540H1380" marker-end="url(#mk-w)"/>
+<path class="w" d="M1120 725H1380" marker-end="url(#mk-w)"/>
+<path class="w" d="M1135 725V785H1060" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="1135" cy="725" r="3"/>
+<text class="m" x="1145" y="797">EX/MEM.RegisterRd</text>
+<path class="w" d="M1400 540H1440" marker-end="url(#mk-w)"/>
+<path class="w" d="M1400 650H1440" marker-end="url(#mk-w)"/>
+<!-- write register return -->
+<path class="w" d="M1400 725H1420V830H404V530H420" marker-end="url(#mk-w)"/>
+<path class="w" d="M1420 800H1060" marker-end="url(#mk-w)"/>
+<circle class="dot" cx="1420" cy="800" r="3"/>
+<text class="m" x="1250" y="822">MEM/WB.RegisterRd</text>
+<!-- write data return -->
+<path class="w" d="M1460 595H1480V850H412V560H420" marker-end="url(#mk-w)"/>
+
+<!-- ===== units ===== -->
+<!-- PC mux -->
+<rect class="u" x="40" y="420" width="20" height="60" rx="10"/>
+<text class="m" x="50" y="439" text-anchor="middle">0</text>
+<text class="m" x="50" y="469" text-anchor="middle">1</text>
+<rect class="u" x="80" y="410" width="30" height="80" rx="3"/>
+<text class="t" x="95" y="455" text-anchor="middle">PC</text>
+<!-- instruction memory -->
+<rect class="u" x="140" y="400" width="120" height="120" rx="4"/>
+<text class="s" x="146" y="446">Read address</text>
+<text class="s" x="254" y="466" text-anchor="end">Instruction</text>
+<text class="t" x="200" y="492" text-anchor="middle">Instruction</text>
+<text class="t" x="200" y="509" text-anchor="middle">memory</text>
+<!-- PC+4 adder -->
+<path class="u" d="M150 290L190 305V335L150 350V326L158 320L150 314Z"/>
+<text class="s" x="174" y="324" text-anchor="middle">Add</text>
+
+<!-- IF/ID -->
+<rect class="r" x="300" y="270" width="20" height="490" rx="2"/>
+<text class="t" x="310" y="780" text-anchor="middle">IF/ID</text>
+
+<!-- hazard detection unit -->
+<rect class="u" x="380" y="50" width="160" height="60" rx="5"/>
+<text class="t" x="460" y="76" text-anchor="middle">Hazard</text>
+<text class="t" x="460" y="94" text-anchor="middle">detection unit</text>
+<!-- control -->
+<ellipse class="u" cx="505" cy="205" rx="38" ry="24"/>
+<text class="t" x="505" y="210" text-anchor="middle">Control</text>
+<!-- stall mux -->
+<rect class="u" x="600" y="178" width="20" height="64" rx="10"/>
+<text class="m" x="610" y="196" text-anchor="middle">0</text>
+<text class="m" x="610" y="232" text-anchor="middle">1</text>
+<!-- AND gate (added) -->
+<path class="ua" d="M680 120H660A15 15 0 0 0 660 150H680Z"/>
+
+<!-- registers -->
+<text class="t" x="490" y="412" text-anchor="middle">Registers</text>
+<rect class="u" x="420" y="420" width="140" height="160" rx="4"/>
+<text class="s" x="425" y="444">Read reg 1</text>
+<text class="s" x="425" y="494">Read reg 2</text>
+<text class="s" x="425" y="534">Write reg</text>
+<text class="s" x="425" y="564">Write data</text>
+<text class="s" x="555" y="444" text-anchor="end">Read data 1</text>
+<text class="s" x="555" y="534" text-anchor="end">Read data 2</text>
+<!-- sign extend -->
+<ellipse class="u" cx="480" cy="640" rx="34" ry="20"/>
+<text class="s" x="480" y="637" text-anchor="middle" style="fill:var(--ink)">Sign-</text>
+<text class="s" x="480" y="650" text-anchor="middle" style="fill:var(--ink)">extend</text>
+<!-- shift left 2 (added) -->
+<ellipse class="ua" cx="575" cy="360" rx="36" ry="16"/>
+<text class="s" x="575" y="364" text-anchor="middle" style="fill:var(--ink)">Shift left 2</text>
+<!-- branch target adder (added) -->
+<path class="ua" d="M640 300L680 320V360L640 380V348L648 340L640 332Z"/>
+<text class="s" x="664" y="344" text-anchor="middle" style="fill:var(--ink)">Add</text>
+<!-- equality comparator (added) -->
+<ellipse class="ua" cx="632" cy="485" rx="17" ry="28"/>
+<text class="t" x="632" y="490" text-anchor="middle">=</text>
+
+<!-- ID/EX -->
+<rect class="r" x="720" y="170" width="20" height="30"/><text class="m" x="730" y="189" text-anchor="middle" style="fill:var(--ink)">WB</text>
+<rect class="r" x="720" y="200" width="20" height="30"/><text class="m" x="730" y="219" text-anchor="middle" style="fill:var(--ink)">M</text>
+<rect class="r" x="720" y="230" width="20" height="30"/><text class="m" x="730" y="249" text-anchor="middle" style="fill:var(--ink)">EX</text>
+<rect class="r" x="720" y="260" width="20" height="500"/>
+<text class="t" x="730" y="780" text-anchor="middle">ID/EX</text>
+
+<!-- forwarding muxes -->
+<rect class="u" x="830" y="420" width="20" height="80" rx="10"/>
+<text class="m" x="840" y="444" text-anchor="middle">00</text>
+<text class="m" x="840" y="464" text-anchor="middle">01</text>
+<text class="m" x="840" y="484" text-anchor="middle">10</text>
+<rect class="u" x="830" y="515" width="20" height="80" rx="10"/>
+<text class="m" x="840" y="534" text-anchor="middle">00</text>
+<text class="m" x="840" y="559" text-anchor="middle">01</text>
+<text class="m" x="840" y="584" text-anchor="middle">10</text>
+<!-- ALUSrc mux -->
+<rect class="u" x="910" y="540" width="20" height="80" rx="10"/>
+<text class="m" x="920" y="559" text-anchor="middle">0</text>
+<text class="m" x="920" y="609" text-anchor="middle">1</text>
+<!-- ALU -->
+<path class="u" d="M960 400L1020 450V590L960 640V540L976 520L960 500Z"/>
+<text class="t" x="1000" y="525" text-anchor="middle">ALU</text>
+<!-- RegDst mux -->
+<rect class="u" x="960" y="690" width="20" height="70" rx="10"/>
+<text class="m" x="970" y="709" text-anchor="middle">0</text>
+<text class="m" x="970" y="749" text-anchor="middle">1</text>
+<!-- forwarding unit -->
+<rect class="u" x="835" y="775" width="225" height="40" rx="5"/>
+<text class="t" x="947" y="800" text-anchor="middle">Forwarding unit</text>
+
+<!-- EX/MEM -->
+<rect class="r" x="1100" y="170" width="20" height="30"/><text class="m" x="1110" y="189" text-anchor="middle" style="fill:var(--ink)">WB</text>
+<rect class="r" x="1100" y="200" width="20" height="30"/><text class="m" x="1110" y="219" text-anchor="middle" style="fill:var(--ink)">M</text>
+<rect class="r" x="1100" y="230" width="20" height="530"/>
+<text class="t" x="1110" y="780" text-anchor="middle">EX/MEM</text>
+
+<!-- data memory -->
+<text class="t" x="1235" y="482" text-anchor="middle">Data memory</text>
+<rect class="u" x="1180" y="490" width="140" height="140" rx="4"/>
+<text class="s" x="1186" y="516">Address</text>
+<text class="s" x="1186" y="596">Write data</text>
+<text class="s" x="1314" y="536" text-anchor="end">Read data</text>
+
+<!-- MEM/WB -->
+<rect class="r" x="1380" y="170" width="20" height="30"/><text class="m" x="1390" y="189" text-anchor="middle" style="fill:var(--ink)">WB</text>
+<rect class="r" x="1380" y="200" width="20" height="560"/>
+<text class="t" x="1390" y="780" text-anchor="middle">MEM/WB</text>
+<!-- MemtoReg mux -->
+<rect class="u" x="1440" y="500" width="20" height="190" rx="10"/>
+<text class="m" x="1450" y="544" text-anchor="middle">1</text>
+<text class="m" x="1450" y="654" text-anchor="middle">0</text>
+
+<!-- numbered badges for the four ID additions -->
+<g class="badge"><circle cx="530" cy="347" r="9"/><text x="530" y="347">1</text></g>
+<g class="badge"><circle cx="690" cy="300" r="9"/><text x="690" y="300">2</text></g>
+<g class="badge"><circle cx="632" cy="447" r="9"/><text x="632" y="447">3</text></g>
+<g class="badge"><circle cx="460" cy="150" r="9"/><text x="460" y="150">4</text></g>
+
+<!-- ===== slide 78 example, clock cycle 3 ===== -->
+<g class="ex">
+  <text class="exv" x="95" y="506" text-anchor="middle">44</text>
+  <text class="exv" x="240" y="314">48</text>
+  <text class="exv" x="150" y="250">72</text>
+  <text class="exv" x="326" y="314">44</text>
+  <text class="exv" x="520" y="634">7</text>
+  <text class="exv" x="616" y="354">28</text>
+  <text class="exv" x="684" y="334">72</text>
+  <text class="exv" x="425" y="457">$1</text>
+  <text class="exv" x="425" y="507">$3</text>
+  <text class="exv" x="656" y="479">1</text>
+  <text class="exv" x="604" y="129">1</text>
+  <text class="exv" x="676" y="155">1</text>
+  <text class="exv" x="470" y="166">1</text>
+  <text class="exv" x="165" y="878" text-anchor="middle">and $12, $2, $5</text>
+  <text class="exv" x="520" y="878" text-anchor="middle">beq $1, $3, 7</text>
+  <text class="exv" x="920" y="878" text-anchor="middle">sub $10, $4, $8</text>
+  <text class="exv" x="1250" y="878" text-anchor="middle">before&lt;1&gt;</text>
+  <text class="exv" x="1450" y="878" text-anchor="middle">before&lt;2&gt;</text>
+</g>
+</svg>
+</div>
+<p class="hint">On a phone, scroll the drawing sideways or tap Fit to screen.</p>
+
+<section class="notes">
+  <div class="card">
+    <h2>The four additions in ID</h2>
+    <ol>
+      <li><span class="k">Shift left 2</span> on the sign-extended offset. The offset counts words, so ×4 turns it into a byte offset.</li>
+      <li><span class="k">Branch target adder</span> computing (PC+4) + offset×4, using the PC+4 already held in IF/ID.</li>
+      <li><span class="k">Equality comparator</span> (=) on Read data 1 and Read data 2. In hardware: XOR the two values bit by bit, then NOR all 32 results. It is far faster than an ALU subtract.</li>
+      <li><span class="k">IF.Flush</span> from Control. When the branch is taken it zeroes the instruction in IF/ID, turning the wrongly fetched instruction into a <code>nop</code>.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h2>Why the decision is ready by the end of ID</h2>
+    <p>Registers are read in the first half of the cycle, so the comparator and the target adder finish within ID. Control's <code>Branch</code> is ANDed with the comparator output to form <code>PCSrc</code>, which selects the target at the PC mux. The PC loads the target at the end of ID, so only the one instruction in IF is wrong and gets flushed: a 1-cycle penalty instead of 3.</p>
+  </div>
+  <div class="card">
+    <h2>Slide 78 example, clock cycle 3</h2>
+    <p><code>beq $1, $3, 7</code> at address 40 is in ID with PC+4 = 44. Target = 44 + 7×4 = <span class="k">72</span>. Since $1 = $3, PCSrc = 1 and IF.Flush = 1: the <code>and</code> fetched from 44 is squashed, and the next fetch is <code>lw $4, 50($7)</code> at 72. Tap <em>Show slide 78 example</em> to see these values on the wires.</p>
+  </div>
+  <div class="card">
+    <h2>What the figure leaves out</h2>
+    <ul>
+      <li>Forwarding paths into the comparator. The operands are now needed in ID, so slides 79–81 add stalls: 1 cycle if the source is the preceding ALU instruction or a load two back, 2 cycles if it is the immediately preceding load.</li>
+      <li>The RegWrite and $zero checks on the forwarding unit (slide 59 omits them too).</li>
+      <li>Individual EX control wires to the ALU control, ALUSrc and RegDst muxes.</li>
+    </ul>
+  </div>
+</section>
+</div>
+
+<script>
+const svg=document.getElementById('dp');
+const bEx=document.getElementById('btn-ex'), bFit=document.getElementById('btn-fit'), fr=document.getElementById('frame');
+bEx.addEventListener('click',()=>{const on=bEx.getAttribute('aria-pressed')!=='true';bEx.setAttribute('aria-pressed',on);svg.classList.toggle('show-ex',on);});
+bFit.addEventListener('click',()=>{const on=bFit.getAttribute('aria-pressed')!=='true';bFit.setAttribute('aria-pressed',on);fr.classList.toggle('fit',on);bFit.textContent=on?'Actual size':'Fit to screen';});
+</script>
+
+</body></html>
