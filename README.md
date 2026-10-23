@@ -34,12 +34,15 @@ The lab draws the pipelined datapath from Chapter 4 Part 2: slide 52's datapath 
 
 1. Pick a case from the example menu at the top (18 cases, each tied to a slide: the slide 53 chain, EX/MEM and MEM/WB hazards, the double data hazard, first-half write / second-half read, RegWrite and $zero checks, stores, load-use stalls, lw → sw, a stall without a real dependence, two loads in a row, code scheduling before and after). **✎ Edit code** opens the editor for your own program.
 2. The overview opens first: what the case shows, the program, every dependence and how the hardware resolves it (EX/MEM, MEM/WB, register file, stall), and the cycle count 5 + (n − 1) + stalls. Press **Start clocking**. The summary button in the program bar (cycles · stalls · forwards) reopens it.
-3. Clock the processor with **Next ▶** or the → key in the sticky toolbar. Each cycle has four steps, and empty steps are skipped:
-   - **↑ Clock edge**: the pipeline registers and PC latch. A held PC or IF/ID is marked.
-   - **1st half**: WB writes the register file.
-   - **2nd half**: ID reads the registers, the hazard detection unit checks slide 69's condition, and IF fetches.
-   - **EX + MEM**: the forwarding unit evaluates slides 61/64 with real register numbers, then the ALU and data memory run.
-   The explanation sits under the diagram (beside it on screens 1900 px and wider). **Spotlight** dims everything a step does not use; **Values** puts the values on the wires. Shift + arrow moves a whole cycle.
+3. Clock the processor with **Next ▶** or the → key in the sticky toolbar. Two views, switched in the toolbar (your choice is remembered):
+   - **Whole cycle** (default): one click = one clock cycle. All stages are lit at once, as they work in hardware; each stage's region and data wires take the colour of the instruction in it. Below the diagram, a timing strip shows the real timing (every stage runs from edge to edge; only the register file is split: write in the 1st half, read in the 2nd half, slide 55), then one card per stage (IF, ID, EX, MEM, WB) with short badges. **Show details** puts the full explanation in every card.
+   - **Focus steps**: the same cycle read one part at a time. This is a reading order, not a time order; the timing strip highlights the part in focus and shows that it runs at the same time as the rest.
+     - **↑ Edge**: the pipeline registers and PC latch. A held PC or IF/ID is marked.
+     - **WB write**: WB writes the register file (1st half).
+     - **ID read · IF**: ID reads the registers (2nd half); the hazard detection unit checks slide 69's condition and IF fetches.
+     - **EX · MEM**: the forwarding unit evaluates slides 61/64 with real register numbers, then the ALU and data memory run.
+     Empty steps are skipped. **Spotlight** dims everything a step does not use. Shift + arrow moves a whole cycle.
+   The explanation sits under the diagram (beside it on screens 1900 px and wider). **Values** puts the values on the wires.
 4. **Show more** adds panels under the simulator: the timing chart (on by default; click a cycle to jump there), pipeline register contents (now and next edge), the register file and memory, and the hardware rules. Your choice is remembered in this browser.
 
 Colours: orange = forwarded from EX/MEM (10), purple = from MEM/WB (01), red = hazard detection / stall, teal = register-file write and read, grey = not used this cycle.
@@ -52,7 +55,7 @@ Same simulator, with branch hardware added to the big diagram. Two choices above
 - **Branch decided in ID** (slide 78, Fig. 4.62): the target adder and an "=" comparator sit in ID, with EX/MEM.ALUResult forwarded into the comparator (ForwardC/ForwardD, slide 79). The hazard detection unit also stalls a branch whose register is still being computed: ALU right before or lw two before = 1 stall (slide 80), lw right before = 2 stalls (slide 81). A taken branch flushes one instruction (IF.Flush).
 - **After a branch**: predict not taken (slides 28–29), stall on branch (slides 26–27: every fetch is thrown away until the branch is decided), or delayed branch (slide 31: the next instruction always runs; ID only).
 
-Both add a PC mux in IF and a band above the diagram that carries PCSrc and the branch target back to it. Each cycle gets a fifth step, **Branch**, whenever a branch is decided (or the pipeline is waiting for one): target, comparator or Zero, PCSrc, and what the next edge flushes. Colours: green = taken branch (target → PC), pink = flushed or thrown away.
+Both add a PC mux in IF and a band above the diagram that carries PCSrc and the branch target back to it. In focus steps, each cycle gets a fifth step, **Branch**, whenever a branch is decided (or the pipeline is waiting for one): target, comparator or Zero, PCSrc, and what the next edge flushes. In the whole-cycle view it is a card above the stage cards. Colours: green = taken branch (target → PC), pink = flushed or thrown away.
 
 The 17 examples follow the slides: slide 77 taken and not taken, a load-use stall and a flush in the same cycle (the flush wins), slide 78, slides 26–29 (stall vs predict, correct and incorrect), slides 79–81 (forward, 1 stall, 2 stalls), slide 31 (delay slot filled, and a nop in the slot), and a counting loop before and after scheduling. The overview lists every branch execution (taken or not, slots thrown away, stalls, forwarding), the cycle count 5 + (n − 1) + stalls + thrown away, and the cycle count of the same program on all five hardware choices. The timing chart has one row per executed instance (a loop body fetched three times gets three rows), pink rows for flushed instructions, and a green arrow from each taken branch to its target fetch.
 
@@ -76,7 +79,7 @@ Slides 82–85: a 1-bit and a 2-bit predictor side by side, stepped one branch a
 ## Code layout
 
 - src/pipeline/engine.ts: parser and encoder, control, cycle-by-cycle simulation (latches, forwarding checks, hazard checks, branch decision, flushes), dependence and branch summaries. `simulate(..., hw)` takes the branch hardware; without it the data-hazard model is unchanged.
-- src/pipeline/explain.ts: clock sub-steps and the explanation for each step.
+- src/pipeline/explain.ts: clock sub-steps, the explanation for each step, and the whole-cycle view (stage cards).
 - src/pipeline/PipelineDatapath.tsx: the slide-style SVG datapath, driven by one simulated cycle and step. With branch hardware it widens the sheet (a coordinate warp) to fit the added units.
 - src/pipeline/examples.ts, src/pipeline/branchExamples.ts: the teaching cases with their slide references.
 - src/pipeline/predictor.ts: 1-bit / 2-bit predictors, branch history table, BTB and cycle costs.

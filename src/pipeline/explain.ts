@@ -2,21 +2,27 @@
 // Text markup: `code` and **bold**; the page renders it.
 
 import { isBranch, regName, type CmpFwd, type Controls, type Cycle, type Fwd, type FwdCheck, type Instr, type Simulation, type Squash } from './engine.ts'
-export type Phase = 'edge' | 'wb' | 'id' | 'ex' | 'br'
+export type Phase = 'edge' | 'wb' | 'id' | 'ex' | 'br' | 'all' // 'all' = the whole cycle at once
 export type Step = { cycle: number; phase: Phase } // cycle is an index into sim.cycles
 
+// The focus steps are a reading order, not a time order: only the edge and the register file's
+// write-then-read (slide 55) are ordered; IF, ID, EX and MEM all work during the whole cycle.
 export const PHASES: { phase: Phase; short: string; long: string }[] = [
-  { phase: 'edge', short: '↑ Clock edge', long: 'Pipeline registers latch' },
-  { phase: 'wb', short: '1st half', long: 'WB writes registers' },
-  { phase: 'id', short: '2nd half', long: 'ID reads · hazard check · IF' },
-  { phase: 'ex', short: 'EX + MEM', long: 'Forwarding · ALU · memory' },
+  { phase: 'edge', short: '↑ Edge', long: 'Pipeline registers latch' },
+  { phase: 'wb', short: 'WB write', long: 'First half: WB writes the register file' },
+  { phase: 'id', short: 'ID read · IF', long: 'Second half: ID reads registers; the hazard check and IF run all cycle' },
+  { phase: 'ex', short: 'EX · MEM', long: 'Forwarding, ALU and data memory, running all cycle in parallel with IF and ID' },
   { phase: 'br', short: 'Branch', long: 'Branch decision · next PC · flush' },
 ]
 /** The sub-steps a lesson shows in its toolbar (the branch step only exists with branch hardware). */
 export const phasesFor = (sim: Simulation) => PHASES.filter((p) => p.phase !== 'br' || !!sim.hw.branch)
 
-/** The sub-steps of every cycle. A sub-step whose stages are all empty is skipped. */
-export function buildSteps(sim: Simulation): Step[] {
+export type ViewMode = 'whole' | 'focus'
+
+/** The sub-steps of every cycle. A sub-step whose stages are all empty is skipped.
+ *  In 'whole' mode there is one step per cycle. */
+export function buildSteps(sim: Simulation, mode: ViewMode = 'focus'): Step[] {
+  if (mode === 'whole') return sim.cycles.map((_, i) => ({ cycle: i, phase: 'all' as const }))
   const steps: Step[] = []
   sim.cycles.forEach((c, i) => {
     steps.push({ cycle: i, phase: 'edge' })
@@ -29,7 +35,8 @@ export function buildSteps(sim: Simulation): Step[] {
 }
 
 export type Check = { text: string; ok: boolean }
-export type Line = { text: string; tone?: 'ex' | 'mem' | 'hazard' | 'rf' | 'muted' | 'branch' | 'flush'; checks?: Check[]; result?: string }
+export type Stage = 'IF' | 'ID' | 'EX' | 'MEM' | 'WB'
+export type Line = { text: string; tone?: 'ex' | 'mem' | 'hazard' | 'rf' | 'muted' | 'branch' | 'flush'; checks?: Check[]; result?: string; stage?: Stage }
 export type Explanation = { title: string; tone: 'normal' | 'hazard' | 'forward' | 'rf' | 'branch' | 'flush'; lines: Line[] }
 
 const q = (i: Instr) => `\`${i.text}\``
@@ -201,6 +208,7 @@ function decode(sim: Simulation, c: Cycle): Explanation {
       ? { text: `IF fetches ${who(f)} at address ${c.fetch.pc}, but a branch is still undecided, so this fetch will be thrown away at the next edge.`, tone: 'flush' }
       : { text: `IF fetches ${who(f)} at address ${c.fetch.pc}.${c.squash?.ifid ? ' (It will be flushed: see the Branch step.)' : ` At the next edge: PC ← ${c.next.pc}, IF/ID ← this instruction.`}`, tone: c.squash?.ifid ? 'flush' : undefined })
   else lines.push({ text: 'IF: there are no more instructions to fetch.', tone: 'muted' })
+  lines[lines.length - 1].stage = 'IF'
   const title = stalled ? (h.branch?.stall ? 'Second half: branch operands not ready, stall' : 'Second half: hazard detected, stall') : 'Second half: ID reads registers · hazard check · IF fetches'
   return { title, tone: stalled ? 'hazard' : 'normal', lines }
 }
@@ -266,6 +274,7 @@ function execute(sim: Simulation, c: Cycle): Explanation {
   else if (m && c.mem?.write) lines.push({ text: `MEM: ${who(m.instr)} writes **${m.writeData}** to Mem[${c.mem.address}] at the end of this cycle.`, tone: 'mem' })
   else if (m && isBranch(m.instr.op) && sim.hw.branch === 'mem') lines.push({ text: `MEM: ${who(m.instr)} does not access memory, but this is where it is decided. See the **Branch** step.`, tone: 'branch' })
   else if (m) lines.push({ text: `MEM: ${who(m.instr)} does not access memory. Its ALU result ${m.aluResult} goes to MEM/WB.`, tone: 'muted' })
+  if (m) lines[lines.length - 1].stage = 'MEM'
   return { title: forwarded ? 'EX + MEM: forwarding in action' : 'EX + MEM: ALU and data memory', tone: forwarded ? 'forward' : 'normal', lines }
 }
 
@@ -336,5 +345,79 @@ export function explain(sim: Simulation, step: Step): Explanation {
   if (step.phase === 'wb') return writeBack(c)
   if (step.phase === 'id') return decode(sim, c)
   if (step.phase === 'br') return branchStep(sim, c)
+  if (step.phase === 'all') { const w = wholeCycle(sim, step.cycle); return { title: w.title, tone: w.tone, lines: w.edge } }
   return execute(sim, c)
+}
+
+// ---------- the whole cycle at once ----------
+
+/** One stage's share of a cycle: who is in it, short badges and the explanation lines. */
+export type StageCard = { stage: Stage; instr: Instr | null; bubble: boolean; gone?: Squash; when: string; badges: { text: string; tone: Line['tone'] }[]; lines: Line[] }
+export type WholeCycle = { title: string; tone: Explanation['tone']; edge: Line[]; cards: StageCard[]; branch: Explanation | null }
+
+export function wholeCycle(sim: Simulation, k: number): WholeCycle {
+  const c = sim.cycles[k]
+  const dec = c.at.ifid || c.fetch.instr ? decode(sim, c).lines : []
+  const exe = c.at.idex || c.at.exmem ? execute(sim, c).lines : []
+  const wbl = c.at.memwb ? writeBack(c).lines : []
+  const stalled = c.hazard.stall && !c.hazard.overridden
+  const b = c.branch
+  const e = c.at.idex
+  const fwd = c.ex && e && !e.bubble && !e.squashed && !(isBranch(e.instr.op) && sim.hw.branch === 'id') ? [c.ex.fa, c.ex.fb].filter((f) => f.sel !== '00' && !(f.unused && e.instr.op !== 'sw')) : []
+  const cmp = b?.at === 'id' ? [b.fa!, b.fb!].filter((f) => f.sel === 1) : []
+  const pkt = (p: { instr: Instr; bubble?: boolean; squashed?: Squash } | null) => ({ instr: p ? (p.squashed?.instr ?? p.instr) : null, bubble: !!p?.bubble && !p.squashed, gone: p?.squashed })
+  const badge = (text: string, tone: Line['tone']) => ({ text, tone })
+  const cards: StageCard[] = [
+    {
+      stage: 'IF', instr: c.fetch.instr, bubble: false, when: 'whole cycle', lines: dec.filter((l) => l.stage === 'IF'),
+      badges: [
+        ...(c.fetch.instr ? [badge(`address ${c.fetch.pc}`, 'muted')] : []),
+        ...(stalled && c.fetch.instr ? [badge('fetched again next cycle', 'hazard')] : []),
+        ...(c.squash?.ifid ? [badge(c.squash.why === 'flush' ? 'flushed at the edge' : 'thrown away', 'flush')] : []),
+      ],
+    },
+    {
+      stage: 'ID', ...pkt(c.at.ifid), when: 'whole cycle · reads registers in the 2nd half', lines: c.at.ifid ? dec.filter((l) => l.stage !== 'IF') : [],
+      badges: [
+        ...(stalled ? [badge(c.hazard.branch?.stall && !c.hazard.loadUse ? 'branch stall' : 'STALL', 'hazard')] : []),
+        ...(c.hazard.overridden ? [badge('stall overridden by flush', 'flush')] : []),
+        ...(c.id && !c.at.ifid?.squashed && (c.id.sameCycleRs || c.id.sameCycleRt) ? [badge('reads the value written in the 1st half', 'rf')] : []),
+        ...(b?.at === 'id' ? [badge(b.taken ? `taken → ${b.target}` : 'not taken', 'branch')] : []),
+        ...cmp.map((f) => badge(`${f.field === 'Rs' ? 'ForwardC' : 'ForwardD'} = 1`, 'ex')),
+        ...(c.squash?.idex ? [badge('ID.Flush', 'flush')] : []),
+      ],
+    },
+    {
+      stage: 'EX', ...pkt(e), when: 'whole cycle', lines: exe.filter((l) => l.stage !== 'MEM'),
+      badges: [
+        ...fwd.map((f) => badge(`${f.field === 'Rs' ? 'ForwardA' : 'ForwardB'} = ${f.sel}`, f.sel === '10' ? 'ex' : 'mem')),
+        ...(c.ex && e && !e.bubble && !e.squashed ? [badge(`${c.ex.aluCtl.name} = ${c.ex.result}`, 'muted')] : []),
+        ...(c.squash?.exmem ? [badge('EX.Flush', 'flush')] : []),
+      ],
+    },
+    {
+      stage: 'MEM', ...pkt(c.at.exmem), when: 'whole cycle · a store is written at the end', lines: exe.filter((l) => l.stage === 'MEM'),
+      badges: [
+        ...(c.mem?.read ? [badge(`read Mem[${c.mem.address}] = ${c.mem.readData}`, 'mem')] : []),
+        ...(c.mem?.write ? [badge(`Mem[${c.mem.address}] ← ${c.at.exmem!.writeData}`, 'mem')] : []),
+        ...(b?.at === 'mem' ? [badge(b.taken ? `taken → ${b.target}` : 'not taken', 'branch')] : []),
+      ],
+    },
+    {
+      stage: 'WB', ...pkt(c.at.memwb), when: '1st half: writes the register file', lines: wbl,
+      badges: c.wb?.writes ? [badge(`${regName(c.wb.rd)} ← ${c.wb.value}`, 'rf')] : [],
+    },
+  ]
+  const bits: string[] = []
+  let tone: Explanation['tone'] = 'normal'
+  const note = (t: string, tn: Explanation['tone']) => { bits.push(t); if (tone === 'normal') tone = tn }
+  if (b?.taken && c.squash?.why === 'flush') note(`branch taken → flush ${+c.squash.ifid + +c.squash.idex + +c.squash.exmem}`, 'flush')
+  else if (b) note(`branch ${b.taken ? 'taken' : 'not taken'}`, 'branch')
+  if (c.waiting) note('waiting for a branch', 'flush')
+  if (stalled) note(c.hazard.branch?.stall && !c.hazard.loadUse ? 'branch stall' : 'load-use stall', 'hazard')
+  for (const f of fwd) note(`${f.field === 'Rs' ? 'ForwardA' : 'ForwardB'} = ${f.sel}`, 'forward')
+  for (const f of cmp) note(`${f.field === 'Rs' ? 'ForwardC' : 'ForwardD'} = 1`, 'forward')
+  if (c.wb?.writes) note(`${regName(c.wb.rd)} written`, 'rf')
+  const title = bits.length ? bits.join(' · ') : 'every stage works in parallel'
+  return { title, tone, edge: edge(sim, k).lines, cards, branch: b || c.waiting ? branchStep(sim, c) : null }
 }

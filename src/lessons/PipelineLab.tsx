@@ -3,7 +3,7 @@ import { PipelineDatapath } from '../pipeline/PipelineDatapath'
 import { instrColor, tint } from '../pipeline/colors'
 import { EXAMPLES, type Example } from '../pipeline/examples'
 import { BRANCH_EXAMPLES } from '../pipeline/branchExamples'
-import { buildSteps, controlText, explain, phasesFor, type Line, type Step } from '../pipeline/explain'
+import { buildSteps, controlText, explain, phasesFor, wholeCycle, type Line, type Phase, type Stage, type StageCard, type Step, type ViewMode } from '../pipeline/explain'
 import {
   branchRuns, dependences, destination, hex, isBranch, NAMES, parseInitial, parseProgram, real, regName, simulate,
   type BranchAt, type Controls, type Cycle, type Hardware, type Instr, type Latches, type Policy, type Simulation, type Squash,
@@ -368,6 +368,94 @@ function TimingChart({ sim, cycle, onSeek }: { sim: Simulation; cycle: number; o
   </div>
 }
 
+// ---------- what happens when inside one clock cycle ----------
+
+/** The real timing of a cycle: every stage works from edge to edge; only the register file is split
+ *  (write in the 1st half, read in the 2nd half, slide 55). The part in focus is highlighted. */
+function TimingStrip({ c, phase, hw }: { c: Cycle; phase: Phase; hw: Hardware }) {
+  const rows: { st: Stage; p: { instr: Instr; bubble?: boolean; squashed?: Squash } | null; what: string; half?: { which: 1 | 2; label: string } }[] = [
+    { st: 'IF', p: c.fetch.instr ? { instr: c.fetch.instr } : null, what: 'fetch' },
+    { st: 'ID', p: c.at.ifid, what: 'decode · hazard check', half: { which: 2, label: 'reg read' } },
+    { st: 'EX', p: c.at.idex, what: 'forwarding · ALU' },
+    { st: 'MEM', p: c.at.exmem, what: 'data memory' },
+    { st: 'WB', p: c.at.memwb, what: 'WB mux', half: { which: 1, label: 'reg write' } },
+  ]
+  const brStage: Stage = hw.branch === 'mem' ? 'MEM' : 'ID'
+  const focus = (st: Stage, part: 'bar' | 1 | 2): boolean => {
+    if (phase === 'all') return true
+    if (phase === 'wb') return st === 'WB' && part === 1
+    if (phase === 'id') return st === 'IF' || (st === 'ID' && part !== 1)
+    if (phase === 'ex') return st === 'EX' || st === 'MEM'
+    if (phase === 'br') return st === brStage
+    return false
+  }
+  return <div className={`pl-timing ${phase === 'all' ? 'whole' : ''}`} aria-label="When things happen in this clock cycle">
+    <div className="pl-timing-head">
+      <span />
+      <span className={phase === 'edge' || phase === 'all' ? 'on' : ''}>↑ edge (registers latch) · 1st half</span>
+      <span>2nd half · next ↑ edge</span>
+    </div>
+    {rows.map((r) => {
+      const color = !r.p ? '#ced4da' : r.p.squashed ? '#d6336c' : r.p.bubble ? '#868e96' : instrColor(r.p.instr)
+      return <div key={r.st} className="pl-timing-row">
+        <b>{r.st}</b>
+        <div className={`pl-timing-bar ${r.p ? '' : 'empty'}`} style={{ ['--c' as string]: color }}>
+          {[1, 2].map((h) => {
+            const accent = r.half?.which === h
+            const on = focus(r.st, h as 1 | 2)
+            return <span key={h} className={`${on ? 'on' : ''} ${accent ? 'accent' : ''}`}>
+              {h === 1 && <em>{r.p ? (r.p.squashed ? `✕ ${r.p.squashed.instr.text}` : r.p.bubble ? 'bubble' : r.p.instr.text) : '—'}</em>}
+              {accent && <i>{r.half!.label}</i>}
+            </span>
+          })}
+        </div>
+      </div>
+    })}
+    <p className="pl-timing-note muted">{phase === 'all'
+      ? 'Every bar runs from edge to edge at the same time. Only the register file has an order: written in the 1st half, read in the 2nd half.'
+      : 'Focus steps are a reading order, not a time order: the highlighted part runs at the same time as the grey ones.'}</p>
+  </div>
+}
+
+const TONE_TAG: Record<string, string> = { ex: 'ex', mem: 'mem', hazard: 'hazard', rf: 'rf', branch: 'branch', flush: 'flush', muted: 'muted' }
+
+function StageCardView({ card, detail }: { card: StageCard; detail: boolean }) {
+  const color = card.gone ? '#d6336c' : !card.instr ? '#ced4da' : card.bubble ? '#868e96' : instrColor(card.instr)
+  return <section className={`pl-card ${card.instr ? '' : 'empty'}`} style={{ borderTopColor: color }}>
+    <header>
+      <b>{card.stage}</b>
+      {card.instr && <Chip i={card.instr} bubble={card.bubble} gone={card.gone} />}
+      <code>{card.instr ? (card.gone ? `${card.gone.why === 'flush' ? 'flushed' : 'discarded'}: ${card.instr.text}` : card.bubble ? 'bubble' : card.instr.text) : 'empty'}</code>
+    </header>
+    <p className="pl-card-when">{card.when}</p>
+    {card.badges.length > 0 && <div className="pl-card-badges">{card.badges.map((b, i) => <span key={i} className={`pl-tag ${TONE_TAG[b.tone ?? 'muted'] ?? 'muted'}`}>{b.text}</span>)}</div>}
+    {detail && card.lines.length > 0 && <ol>{card.lines.map((l, k) => <LineView key={k} line={l} />)}</ol>}
+  </section>
+}
+
+function WholeCycleView({ sim, k, detail, setDetail }: { sim: Simulation; k: number; detail: boolean; setDetail: (v: boolean) => void }) {
+  const w = wholeCycle(sim, k)
+  const c = sim.cycles[k]
+  return <aside className={`pl-explain pl-whole ${w.tone}`} aria-label="What happens in this clock cycle">
+    <div className="pl-whole-head">
+      <h2>Cycle {c.n}: {w.title}</h2>
+      <button aria-pressed={detail} onClick={() => setDetail(!detail)} title="Show the full explanation in every stage card">{detail ? 'Hide details' : 'Show details'}</button>
+    </div>
+    <TimingStrip c={c} phase="all" hw={sim.hw} />
+    <details className="pl-edge-lines">
+      <summary>What latched at the ↑ edge that started this cycle</summary>
+      <ol>{w.edge.map((l, i) => <LineView key={i} line={l} />)}</ol>
+    </details>
+    {w.branch && <section className={`pl-card pl-card-branch ${w.branch.tone}`}>
+      <header><b>Branch decision</b> <span className="muted">{sim.hw.branch === 'mem' ? 'in MEM' : 'in ID'}, settles by the end of the cycle</span></header>
+      <p className="pl-card-when">{w.branch.title}</p>
+      {detail && <ol>{w.branch.lines.map((l, i) => <LineView key={i} line={l} />)}</ol>}
+    </section>}
+    <div className="pl-cards">{w.cards.map((card) => <StageCardView key={card.stage} card={card} detail={detail} />)}</div>
+    <p className="pl-keys muted">→ next cycle · ← back · switch to <b>Focus steps</b> to read one part at a time</p>
+  </aside>
+}
+
 // ---------- page ----------
 
 function LineView({ line }: { line: Line }) {
@@ -418,6 +506,8 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
   const [editing, setEditing] = useState(false)
   const [intro, setIntro] = useState(true)
   const [spotlight, setSpotlight] = usePref('pl-spotlight', true)
+  const [mode, setMode] = usePref<ViewMode>('pl-mode', 'whole')
+  const [detail, setDetail] = usePref('pl-detail', false)
   const [values, setValues] = usePref('pl-values', true)
   const [panels, setPanels] = usePref<PanelId[]>('pl-panels', ['chart'])
   const simRef = useRef<HTMLElement>(null)
@@ -426,7 +516,7 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
   const others = useMemo(() => lesson.branches ? ALL_HW.map((h) => {
     try { return { hw: h, cycles: run(input, true, h).cycles.length as number | string } } catch { return { hw: h, cycles: '—' } }
   }) : [], [input, lesson.branches])
-  const steps = useMemo(() => buildSteps(sim), [sim])
+  const steps = useMemo(() => buildSteps(sim, mode), [sim, mode])
   const step: Step = steps[Math.min(stepIndex, steps.length - 1)]
   const c = sim.cycles[step.cycle]
   const prev = step.cycle > 0 ? sim.cycles[step.cycle - 1] : null
@@ -475,6 +565,13 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
 
   const memAddrs = [...new Set([...Object.keys(c.memory), ...Object.keys(sim.final.memory)].map(Number))].sort((a, b) => a - b)
   const groups = [...new Set(EX.map((e) => e.group))]
+  const switchMode = (m: ViewMode) => {
+    if (m === mode) return
+    setMode(m)
+    setStepIndex(Math.max(0, buildSteps(sim, m).findIndex((s) => s.cycle === step.cycle)))
+  }
+  const whole = mode === 'whole'
+  const atEdge = step.phase === 'edge' || step.phase === 'all'
   const regsShown = step.phase === 'edge' ? c.regs : c.regsMid
   const wbReg = c.wb?.writes && step.phase !== 'edge' ? c.wb.rd : -1
   const current = example >= 0 ? EX[example] : null
@@ -566,24 +663,29 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
           <b>Cycle {c.n}<span className="muted"> / {sim.cycles.length}</span></b>
           <span className={`pl-now-title ${ex.tone}`}>{ex.title}</span>
         </div>
-        <ol className="pl-phases" aria-label="Steps of this cycle">
+        <div className="pl-mode" role="radiogroup" aria-label="View">
+          <button role="radio" aria-checked={whole} onClick={() => switchMode('whole')} title="One click = one clock cycle; every stage at once, tinted with its instruction">Whole cycle</button>
+          <button role="radio" aria-checked={!whole} onClick={() => switchMode('focus')} title="Read one part of the cycle at a time">Focus steps</button>
+        </div>
+        {!whole && <ol className="pl-phases" aria-label="Focus within this cycle">
+          <li className="pl-phases-label" aria-hidden>Focus:</li>
           {phases.map((p) => {
             const k = steps.findIndex((s) => s.cycle === step.cycle && s.phase === p.phase)
             return <li key={p.phase} className={`${step.phase === p.phase ? 'on' : ''} ${k < 0 ? 'skip' : ''}`}>
               <button disabled={k < 0} onClick={() => go(k)} title={p.long}>{p.short}</button>
             </li>
           })}
-        </ol>
+        </ol>}
         <div className="pl-buttons">
           <button onClick={() => go(0)} disabled={stepIndex === 0} title="Back to cycle 1" aria-label="Reset">⇤</button>
-          <button onClick={prevCycle} disabled={stepIndex === 0} title="Previous cycle (Shift + ←)" aria-label="Previous cycle">« Cycle</button>
-          <button onClick={() => go(stepIndex - 1)} disabled={stepIndex === 0} title="Previous step (←)">◀ Back</button>
-          <button className="lab-primary" onClick={() => go(stepIndex + 1)} disabled={stepIndex === last} title="Next step (→)">Next ▶</button>
-          <button onClick={nextCycle} disabled={stepIndex === last} title="Next cycle (Shift + →)" aria-label="Next cycle">Cycle »</button>
+          {!whole && <button onClick={prevCycle} disabled={stepIndex === 0} title="Previous cycle (Shift + ←)" aria-label="Previous cycle">« Cycle</button>}
+          <button onClick={() => go(stepIndex - 1)} disabled={stepIndex === 0} title={whole ? 'Previous cycle (←)' : 'Previous step (←)'}>◀ Back</button>
+          <button className="lab-primary" onClick={() => go(stepIndex + 1)} disabled={stepIndex === last} title={whole ? 'Next cycle (→)' : 'Next step (→)'}>{whole ? 'Next cycle ▶' : 'Next ▶'}</button>
+          {!whole && <button onClick={nextCycle} disabled={stepIndex === last} title="Next cycle (Shift + →)" aria-label="Next cycle">Cycle »</button>}
           <button onClick={() => go(last)} disabled={stepIndex === last} title="Last cycle" aria-label="End">⇥</button>
         </div>
         <div className="pl-view">
-          <button aria-pressed={spotlight} onClick={() => setSpotlight(!spotlight)} title="Dim everything this step does not use">Spotlight</button>
+          {!whole && <button aria-pressed={spotlight} onClick={() => setSpotlight(!spotlight)} title="Dim everything this step does not use">Spotlight</button>}
           <button aria-pressed={values} onClick={() => setValues(!values)} title="Show the values on the wires">Values</button>
         </div>
         <div className="pl-progress" aria-hidden><i style={{ width: `${(stepIndex / Math.max(1, last)) * 100}%` }} /></div>
@@ -591,11 +693,13 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
 
       <div className="pl-stage">
         <div className="pl-diagram"><PipelineDatapath cycle={c} phase={step.phase} spotlight={spotlight} values={values} hw={sim.hw} /></div>
-        <aside className={`pl-explain ${ex.tone}`} aria-label="What happens in this step">
-          <h2>{ex.title}</h2>
-          <ol>{ex.lines.map((l, k) => <LineView key={k} line={l} />)}</ol>
-          <p className="pl-keys muted">→ next step · ← back · Shift + arrow = whole cycle</p>
-        </aside>
+        {whole ? <WholeCycleView sim={sim} k={step.cycle} detail={detail} setDetail={setDetail} />
+          : <aside className={`pl-explain ${ex.tone}`} aria-label="What happens in this step">
+            <h2>{ex.title}</h2>
+            <TimingStrip c={c} phase={step.phase} hw={sim.hw} />
+            <ol>{ex.lines.map((l, k) => <LineView key={k} line={l} />)}</ol>
+            <p className="pl-keys muted">→ next step · ← back · Shift + arrow = whole cycle</p>
+          </aside>}
       </div>
       <div className="pl-legend">
         <span><i style={{ background: '#e8590c' }} />EX/MEM → ALU (Forward = 10){lesson.branches && hw.branch === 'id' ? ' or → comparator' : ''}</span>
@@ -628,11 +732,11 @@ function PipelineLab({ lesson }: { lesson: Lesson }) {
     {panels.includes('latches') && <section className="pl-panel">
       <div className="pl-head"><h2>Pipeline register contents</h2><span className="muted">“Next edge” is what each register latches at the end of this cycle. Highlighted rows changed at the last edge.</span></div>
       <div className="pl-latches">
-        <Latch title="PC" k="pc" c={c} prev={prev} edge={step.phase === 'edge'} hw={sim.hw} />
-        <Latch title="IF/ID" k="ifid" c={c} prev={prev} edge={step.phase === 'edge'} hw={sim.hw} />
-        <Latch title="ID/EX" k="idex" c={c} prev={prev} edge={step.phase === 'edge'} hw={sim.hw} />
-        <Latch title="EX/MEM" k="exmem" c={c} prev={prev} edge={step.phase === 'edge'} hw={sim.hw} />
-        <Latch title="MEM/WB" k="memwb" c={c} prev={prev} edge={step.phase === 'edge'} hw={sim.hw} />
+        <Latch title="PC" k="pc" c={c} prev={prev} edge={atEdge} hw={sim.hw} />
+        <Latch title="IF/ID" k="ifid" c={c} prev={prev} edge={atEdge} hw={sim.hw} />
+        <Latch title="ID/EX" k="idex" c={c} prev={prev} edge={atEdge} hw={sim.hw} />
+        <Latch title="EX/MEM" k="exmem" c={c} prev={prev} edge={atEdge} hw={sim.hw} />
+        <Latch title="MEM/WB" k="memwb" c={c} prev={prev} edge={atEdge} hw={sim.hw} />
       </div>
     </section>}
 

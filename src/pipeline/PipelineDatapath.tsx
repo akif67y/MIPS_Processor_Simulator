@@ -29,6 +29,7 @@ const SPOT: Record<Phase, Group[]> = {
   id: ['pc', 'if', 'id', 'hdu', 'rf'],
   ex: ['ex', 'fu', 'mem'],
   br: ['br', 'pc'],
+  all: ['pc', 'if', 'id', 'hdu', 'ex', 'fu', 'mem', 'wb', 'rf', 'regs', 'br'],
 }
 
 const W = 2100
@@ -128,15 +129,16 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
   const memOp = !!M && (!!M.ctrl.MemRead || !!M.ctrl.MemWrite)
   const writes = !!c.wb?.writes
   const on = (cond: unknown, look: Look = 'normal'): Look => (cond ? look : 'faded')
-  const rfLook = (cond: unknown): Look => (cond ? (phase === 'wb' ? 'rf' : 'normal') : 'faded')
-  const lit = (gs: Group[]) => !spotlight || gs.some((g) => SPOT[phase].includes(g))
+  const rfLook = (cond: unknown): Look => (cond ? (phase === 'wb' || whole ? 'rf' : 'normal') : 'faded')
+  const whole = phase === 'all' // the whole cycle at once: everything lit, each stage tinted with its instruction
+  const lit = (gs: Group[]) => !spotlight || whole || gs.some((g) => SPOT[phase].includes(g))
   const op = (gs: Group[]) => (lit(gs) ? 1 : 0.18)
-  const showFwd = !spotlight || phase === 'ex'
+  const showFwd = !spotlight || phase === 'ex' || whole
   const show = (gs: Group[]) => values && lit(gs)
 
   // Branch state for this cycle.
   const b = c.branch
-  const showBr = !spotlight || phase === 'br'
+  const showBr = !spotlight || phase === 'br' || whole
   const taken = !!b?.taken
   const flushing = c.squash?.why === 'flush'
   const ifFlush = !!c.squash?.ifid // a taken-branch flush, or a fetch discarded while waiting (stall on branch)
@@ -385,6 +387,24 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
   ]
   const toneColor = { hazard: COLORS.hazard, flush: COLORS.flush, branch: COLORS.branch }
 
+  // Whole-cycle view: which stage a wire belongs to (its first group), and that stage's colour.
+  const pktColor = (p: { instr: Instr; bubble?: boolean; squashed?: Squash } | null | undefined) => (!p ? null : p.squashed ? COLORS.flush : p.bubble ? '#868e96' : instrColor(p.instr))
+  const stageColor: Record<'IF' | 'ID' | 'EX' | 'MEM' | 'WB', string | null> = {
+    IF: F ? instrColor(F) : null, ID: pktColor(ifid), EX: pktColor(idex), MEM: pktColor(exmem), WB: pktColor(memwb),
+  }
+  const OWNER: Record<Group, 'IF' | 'ID' | 'EX' | 'MEM' | 'WB' | null> = {
+    pc: 'IF', if: 'IF', id: 'ID', hdu: 'ID', ex: 'EX', fu: 'EX', mem: 'MEM', wb: 'WB', rf: 'WB', regs: null, br: BR === 'mem' ? 'MEM' : 'ID',
+  }
+  const wireColor = (x: WireDef) => {
+    if (!whole || x.look !== 'normal' || x.kind === 'ctrl') return undefined
+    const st = OWNER[x.g[0]]
+    return (st && stageColor[st]) ?? undefined
+  }
+  const bands: { st: 'IF' | 'ID' | 'EX' | 'MEM' | 'WB'; x0: number; x1: number }[] = [
+    { st: 'IF', x0: -LEFT, x1: X(400) }, { st: 'ID', x0: X(440), x1: X(1000) }, { st: 'EX', x0: X(1040), x1: X(1540) },
+    { st: 'MEM', x0: X(1580), x1: X(1900) }, { st: 'WB', x0: X(1940), x1: X(2100) },
+  ]
+
   const vbW = W + DX + DX2 + LEFT
   return (
     <svg viewBox={`${-LEFT} ${-TOP} ${vbW} ${H + TOP}`} className="pipeline-svg" style={{ minWidth: Math.round((1050 * vbW) / W) }} role="img"
@@ -400,6 +420,7 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
         </pattern>
       </defs>
       <rect x={-LEFT} y={-TOP} width={vbW} height={H + TOP} fill="white" />
+      {whole && bands.map((bd) => stageColor[bd.st] && <rect key={bd.st} x={bd.x0} y={92 - TOP} width={bd.x1 - bd.x0} height={H + TOP - 92} fill={tint(stageColor[bd.st]!, '10')} />)}
 
       {stages.map((s) => {
         const y0 = 8 - TOP
@@ -423,7 +444,7 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
 
       {wires.map((x, i) => (
         <g key={i} opacity={op(x.g)}>
-          <Wire pts={x.raw ? x.pts : x.pts.map(([px, py]) => [X(px), py] as Pt)} look={x.look} kind={x.kind} thick={x.thick} arrow={x.arrow ?? true}
+          <Wire pts={x.raw ? x.pts : x.pts.map(([px, py]) => [X(px), py] as Pt)} look={x.look} kind={x.kind} thick={x.thick} arrow={x.arrow ?? true} color={wireColor(x)}
             dots={x.raw ? x.dots : x.dots?.map(([px, py]) => [X(px), py] as Pt)} />
         </g>
       ))}
@@ -612,8 +633,8 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {} }
             : !hz.memRead ? (hz.branch ? 'operands ready → no stall' : 'MemRead = 0 → no stall')
               : hz.loadUse ? `lw rt ${regName(hz.idexRt)} = ${hz.matchRs ? 'rs' : 'rt'} → STALL` : `lw rt ${regName(hz.idexRt)} ≠ rs, rt → no stall`} />
       )}
-      {show(['rf']) && phase === 'wb' && writes && c.wb && <Tag x={600} y={468} anchor="start" color={COLORS.rf} text={`1st half: ${regName(c.wb.rd)} ← ${c.wb.value}`} />}
-      {show(['rf']) && phase === 'id' && D && c.id && <Tag x={600} y={468} anchor="start" color={COLORS.rf} text={`2nd half: read ${regName(D.rs)}, ${regName(D.rt)}`} />}
+      {show(['rf']) && (phase === 'wb' || whole) && writes && c.wb && <Tag x={600} y={468} anchor="start" color={COLORS.rf} text={`1st half: ${regName(c.wb.rd)} ← ${c.wb.value}`} />}
+      {show(['rf']) && (phase === 'id' || whole) && D && c.id && <Tag x={600} y={whole ? 806 : 468} anchor="start" color={COLORS.rf} text={`2nd half: read ${regName(D.rs)}, ${regName(D.rt)}`} />}
       {showFwd && E && ex && ex.fa.double && <g opacity={op(['fu'])}><Tag x={X(1165)} y={494} text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
       {showFwd && E && ex && ex.fb.double && <g opacity={op(['fu'])}><Tag x={X(1094)} y={741} anchor="end" text={`${c.wb!.value} ✘ older`} color={COLORS.memwb} /></g>}
       {show(['ex']) && E && ex && <g transform={sh(1300)}>

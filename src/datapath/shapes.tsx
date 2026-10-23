@@ -74,10 +74,12 @@ export function Wire(props: {
   thick?: boolean
   arrow?: boolean
   dots?: Pt[]
+  /** Overrides the colour of the look (used to tint a stage with its instruction's colour). */
+  color?: string
 }) {
-  const { pts, look, kind = 'data', thick, arrow = true, dots = [] } = props
+  const { pts, look, kind = 'data', thick, arrow = true, dots = [], color } = props
   if (look === 'hidden') return null
-  const c = strokeOf(look, kind)
+  const c = color ?? strokeOf(look, kind)
   const base = thick ? 6 : 2.6
   const w = hot(look) ? base + 3 : look === 'computed' ? base + 1.2 : base
   const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' ')

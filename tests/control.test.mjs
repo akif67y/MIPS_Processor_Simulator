@@ -274,3 +274,32 @@ test('slides 83–84: 1-bit misses twice per inner loop, 2-bit once', () => {
   assert.equal(cost.staticNotTaken(r[1], 3), 3)
   assert.throws(() => parseOutcomes('T X'))
 })
+
+test('whole-cycle view: one step per cycle, five stage cards, nothing lost from the focus steps', async () => {
+  const { wholeCycle } = await import('../src/pipeline/explain.ts')
+  const { EXAMPLES } = await import('../src/pipeline/examples.ts')
+  const sims = [
+    ...EXAMPLES.map((e) => { const init = parseInitial(e.registers, e.memory); return simulate(parseProgram(e.code), init.regs, init.memory) }),
+    ...BRANCH_EXAMPLES.flatMap((e) => HW.map((hw) => run(e.code, e.registers, e.memory, hw))),
+  ]
+  for (const sim of sims) {
+    const steps = buildSteps(sim, 'whole')
+    assert.equal(steps.length, sim.cycles.length)
+    sim.cycles.forEach((c, k) => {
+      const w = wholeCycle(sim, k)
+      assert.deepEqual(w.cards.map((x) => x.stage), ['IF', 'ID', 'EX', 'MEM', 'WB'])
+      // every line of the focus steps (except the edge and branch, shown separately) lands in a stage card
+      const focus = buildSteps(sim).filter((s) => s.cycle === k && s.phase !== 'edge' && s.phase !== 'br').flatMap((s) => explain(sim, s).lines)
+      assert.equal(w.cards.reduce((n, x) => n + x.lines.length, 0), focus.length)
+      assert.equal(!!w.branch, !!(c.branch || c.waiting))
+      assert.ok(w.title.length > 0)
+    })
+  }
+  // slide 72's stall cycle shows the stall in ID and the re-fetch in IF
+  const lu = EXAMPLES.find((e) => e.name.startsWith('Load-use hazard'))
+  const init = parseInitial(lu.registers, lu.memory)
+  const w = wholeCycle(simulate(parseProgram(lu.code), init.regs, init.memory), 2)
+  assert.ok(w.cards[1].badges.some((b) => b.text === 'STALL'))
+  assert.ok(w.cards[0].badges.some((b) => /again/.test(b.text)))
+  assert.equal(w.tone, 'hazard')
+})
