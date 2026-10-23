@@ -419,7 +419,7 @@ export function PipelineDatapath({ cycle: c, phase, spotlight, values, hw = {}, 
   const vbW = W + DX + DX2 + LEFT
   const vb = view ?? sheetBox(hw, !studio)
   return (
-    <svg viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} className={studio ? 'pipeline-svg studio' : 'pipeline-svg'} style={studio ? undefined : { minWidth: Math.round((1050 * vbW) / W) }} role="img"
+    <svg viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} className={studio ? 'pipeline-svg st-svg' : 'pipeline-svg'} style={studio ? undefined : { minWidth: Math.round((1050 * vbW) / W) }} role="img"
       aria-label={`Pipelined datapath with forwarding and hazard detection${BR ? `, branch decided in ${BR.toUpperCase()}` : ''}, clock cycle ${c.n}`}>
       <defs>
         <pattern id="pl-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
