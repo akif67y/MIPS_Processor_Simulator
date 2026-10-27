@@ -198,6 +198,15 @@ function ItemView({ item, all }: { item: Item; all: boolean }) {
   </li>
 }
 
+/** Holds the space of its widest variant (invisible copies in the same grid cell), so changing text
+ *  between steps never reflows the stage around the datapath. */
+function Stable({ children, widest, className = '' }: { children: ReactNode; widest: ReactNode[]; className?: string }) {
+  return <span className={`st-stable ${className}`}>
+    <span>{children}</span>
+    {widest.map((x, k) => <span key={k} className="st-ghost" aria-hidden="true">{x}</span>)}
+  </span>
+}
+
 function Popover({ open, onClose, children, className }: { open: boolean; onClose: () => void; children: ReactNode; className: string }) {
   if (!open) return null
   return <>
@@ -705,18 +714,28 @@ function Studio({ lesson }: { lesson: Lesson }) {
           </div>
         </>}
         <div className="st-stage-foot">
-          {!showPlan && !showChart ? <div className="st-legend" aria-label="Colours in view">
-            <span className="st-legend-title">In view</span>
-            {LEGEND.filter((x) => inView.includes(x.key)).map((x) => <span key={x.key}><i style={{ background: x.color }} />{legendLabel(x.key, x.label)}</span>)}
+          {/* The legend lists only what is in view, but keeps the room of every entry this lab can show:
+              otherwise it would wrap or unwrap from step to step and the datapath would change size. */}
+          {!showPlan && !showChart ? <div className="st-stable st-legend-stack">
+            <div className="st-legend" aria-label="Colours in view">
+              <span className="st-legend-title">In view</span>
+              {LEGEND.filter((x) => inView.includes(x.key)).map((x) => <span key={x.key}><i style={{ background: x.color }} />{legendLabel(x.key, x.label)}</span>)}
+            </div>
+            <div className="st-legend st-ghost" aria-hidden="true">
+              <span className="st-legend-title">In view</span>
+              {LEGEND.filter((x) => branches || (x.key !== 'branch' && x.key !== 'flush')).map((x) => <span key={x.key}><i />{x.key === 'exmem' && branches ? `${x.label} and → comparator` : x.label}</span>)}
+            </div>
           </div> : <span />}
           <div className="st-clock" role="toolbar" aria-label="Clock">
             {started
-              ? <span className="st-clock-now"><b>Cycle {c.n}</b> <span className="muted">· {whole ? 'whole cycle' : `step ${kInCycle + 1} of ${cycleSteps.length}`}</span></span>
+              ? <Stable className="st-clock-now" widest={[<><b>Cycle {sim.cycles.length}</b> · step 5 of 5</>, <><b>Cycle {sim.cycles.length}</b> · whole cycle</>]}>
+                <b>Cycle {c.n}</b> <span className="muted">· {whole ? 'whole cycle' : `step ${kInCycle + 1} of ${cycleSteps.length}`}</span>
+              </Stable>
               : <span className="st-clock-now muted">Jump to a cycle</span>}
             {scrubber}
             {started ? <>
               <button className="st-pill" onClick={() => go(stepIndex - 1)} disabled={stepIndex === 0} title={whole ? 'Previous cycle (←)' : 'Previous step (←)'}>◀ Back</button>
-              <button className="st-primary" onClick={() => go(stepIndex + 1)} disabled={stepIndex === last} title={whole ? 'Next cycle (→)' : 'Next step (→)'}>{whole ? 'Next cycle ▶' : 'Next ▶'}</button>
+              <button className="st-primary" onClick={() => go(stepIndex + 1)} disabled={stepIndex === last} title={whole ? 'Next cycle (→)' : 'Next step (→)'}><Stable widest={['Next cycle ▶', 'Next ▶']}>{whole ? 'Next cycle ▶' : 'Next ▶'}</Stable></button>
             </> : <button className="st-primary big" onClick={() => { setStepIndex(0); setStarted(true); setChart(false) }}>Start clocking ▶</button>}
           </div>
         </div>

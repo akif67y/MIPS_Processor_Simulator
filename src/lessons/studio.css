@@ -58,13 +58,25 @@ body:has(.studio) .topnav { display: none; }
 
 /* ---------- main row ---------- */
 .st-main { flex: 1; min-height: 0; display: flex; }
-.st-stage { flex: 999 1 640px; min-width: 0; background: var(--stage); padding: 16px; display: flex; flex-direction: column; gap: 12px; position: relative; }
+.st-stage { flex: 999 1 640px; min-width: 0; background: var(--stage); padding: 16px; display: flex; flex-direction: column; gap: 12px; position: relative; container: st-stage / inline-size; }
+/* Text that changes between steps keeps the room of its widest variant (see Stable in Studio.tsx). */
+.st-stable { display: inline-grid; }
+.st-stable > * { grid-area: 1 / 1; }
+.st-ghost { visibility: hidden; pointer-events: none; }
 .st-hint { margin: 0; font-size: 13px; color: var(--muted); }
 
 /* stage header: occupancy chips, camera, values */
-.st-stage-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
-.st-occupancy { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
-.st-occupancy li { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: var(--radius-pill); background: var(--card); transition: opacity 0.2s; }
+/* The header keeps one height for the whole run: the chips stay on one row (their code shortens instead of wrapping),
+   and on a narrow stage the camera and Values always take a row of their own. */
+.st-stage-head { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 10px; }
+.st-occupancy { list-style: none; margin: -2px; padding: 2px; display: flex; flex-wrap: nowrap; gap: 6px; font-size: 13px; min-width: 0; overflow: hidden; }
+.st-occupancy li { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: var(--radius-pill); background: var(--card); transition: opacity 0.2s; flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+.st-occupancy li > b, .st-occupancy li > .pl-chip { flex: none; }
+.st-occupancy li > code, .st-occupancy li > span:not(.pl-chip) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@container st-stage (width < 860px) {
+  .st-stage-head { flex-wrap: wrap; }
+  .st-occupancy { flex: 1 1 100%; }
+}
 .st-occupancy li.on { box-shadow: 0 0 0 2px var(--ink); }
 .st-occupancy li.off { opacity: 0.45; }
 .st-occupancy code { font-size: 12px; }
@@ -72,7 +84,7 @@ body:has(.studio) .topnav { display: none; }
 .st-occupancy li.fl.on { box-shadow: inset 0 0 0 1.5px var(--flush), 0 0 0 2px var(--ink); }
 .st-occ-br { color: var(--tag-branch-text); font-weight: 600; }
 .st-occ-fl { color: var(--tag-flush-text); font-weight: 600; }
-.st-stage-tools { display: flex; align-items: center; gap: 6px; }
+.st-stage-tools { display: flex; align-items: center; gap: 6px; flex: none; }
 .st-seg { display: flex; gap: 2px; background: var(--card); border-radius: var(--radius-pill); padding: 3px; }
 .st-seg button { min-height: 34px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: transparent; font-size: 13px; }
 .st-seg button[aria-checked='true'] { background: var(--primary); color: white; font-weight: 600; }
@@ -119,7 +131,8 @@ body:has(.studio) .topnav { display: none; }
 
 /* stage footer: legend + clock bar */
 .st-stage-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
-.st-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
+.st-legend-stack { min-width: 0; }
+.st-legend { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
 .st-legend span { display: flex; align-items: center; gap: 6px; }
 .st-legend i { width: 20px; height: 4px; border-radius: 2px; }
 .st-legend-title { font-weight: 600; color: var(--ink); }
