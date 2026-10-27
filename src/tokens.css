@@ -128,6 +128,15 @@
   --bubble-border: #b9b5aa;
   --stall-hatch: #d6d2c7;
 
+  /* ---------- home page only (never on lab pages, never for meaning) ---------- */
+  --home-tomato: #EF5B3B;        /* IF blocks, Forwarding tile, "13 cycles" */
+  --home-mustard: #F4B53F;       /* ID blocks, Control hazards tile, the moved line */
+  --home-sage: #8DB596;          /* EX blocks, Single-cycle tile, "11 cycles" */
+  --home-lilac: #B7A5E6;         /* MEM blocks, Data hazards tile, textbook card */
+  --home-ink-soft: #4A4945;      /* secondary text on bg and card */
+  --home-on-ink-soft: #D9D7D0;   /* secondary text on the ink tile */
+  --home-on-ink-muted: #CFCDC6;  /* captions on the ink course block */
+
   /* ---------- shadows ---------- */
   --shadow-menu: 0 14px 40px #1d1b1626;
   --shadow-selected: 0 1px 3px #00000033;

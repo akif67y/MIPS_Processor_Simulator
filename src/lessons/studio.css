@@ -28,9 +28,9 @@ body:has(.studio) .topnav { display: none; }
 .st-top-left { display: flex; align-items: center; gap: 16px; }
 .st-brand { display: flex; align-items: center; gap: 9px; font-size: 17px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); text-decoration: none; }
 .st-brand > span { display: flex; gap: 3px; }
-.st-brand i { width: 6px; height: 16px; border-radius: 3px; background: #EF5B3B; }
-.st-brand i:nth-child(2) { background: #F4B53F; }
-.st-brand i:nth-child(3) { background: #8DB596; }
+.st-brand i { width: 6px; height: 16px; border-radius: 3px; background: var(--home-tomato); }
+.st-brand i:nth-child(2) { background: var(--home-mustard); }
+.st-brand i:nth-child(3) { background: var(--home-sage); }
 .st-section { border: 0; background: var(--field); }
 .st-example { display: flex; align-items: center; gap: 10px; }
 .st-top-actions { display: flex; flex-wrap: wrap; gap: 6px; }

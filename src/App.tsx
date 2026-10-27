@@ -9,10 +9,12 @@ import { ControlHazardLab } from './lessons/PipelineLab'
 import { DataHazardLab } from './lessons/DataStudio'
 import { NAV } from './nav'
 import { BranchPrediction } from './lessons/BranchPrediction'
+import { Home } from './home/Home'
 
 const ext = (spec: ExtensionSpec) => () => <ExtensionPage spec={spec} />
 
 // One page per lesson, addressed by the URL hash (e.g. #/datapath). Titles and order come from NAV.
+// #/ and any other address open the home page.
 const VIEWS: Record<string, ComponentType> = {
   'pc-update': PcUpdate,
   datapath: DatapathWalk,
@@ -43,18 +45,20 @@ export default function App() {
   useEffect(() => {
     const onHash = () => {
       setPath(currentPath())
-      window.scrollTo(0, 0)
+      // A home-page section link (#labs) scrolls to its section; anything else starts at the top.
+      if (!document.getElementById(window.location.hash.slice(1))) window.scrollTo(0, 0)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  const page = PAGES.find((p) => p.path === path) ?? PAGES[0]
+  const page = PAGES.find((p) => p.path === path)
+  if (!page) return <Home />
 
   return (
     <>
       <nav className="topnav">
-        <span className="brand">CSE 209 Lab</span>
+        <a className="brand" href="#/">CSE 209 Lab</a>
         {PAGES.map((p) => (
           <a key={p.path} href={`#/${p.path}`} className={p === page ? 'on' : ''}>
             {p.title}
