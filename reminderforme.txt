@@ -1,0 +1,6 @@
+1. kalo kalo lekha gulo onek boro ashe. also diagram size niye kothabarta bola lagbe
+2. branch predictor design er top bar ta onno design gular sathe jay na
+3. onno design gula theke slide 53 eshob shorano
+4. onno design gular motoi branch predictor er top bar redesign kothabarta
+5. onno page gula design kothabarta
+6. then done. home page ta bhalo hoiche
