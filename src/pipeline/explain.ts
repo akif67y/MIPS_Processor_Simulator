@@ -276,7 +276,7 @@ function execute(sim: Simulation, c: Cycle): Explanation {
     forwarded = x.fa.sel !== '00' || (x.fb.sel !== '00' && !x.fb.unused)
     lines.push({ text: `ALUSrc = ${e.ctrl.ALUSrc}: ALU input B = ${e.ctrl.ALUSrc ? `the sign-extended immediate ${e.imm}` : `the ForwardB mux output ${x.fb.value}`}. ALU control (ALUOp = ${e.ctrl.ALUOp.toString(2).padStart(2, '0')}${e.ctrl.ALUOp === 2 ? `, funct = ${(e.imm & 63).toString(2).padStart(6, '0')}` : ''}) → **${x.aluCtl.name}**: ${aluText(x.aluCtl.name, x.aluA, x.aluB)} = **${x.result}**.`, at: 'alu', label: `${aluText(x.aluCtl.name, x.aluA, x.aluB)} = ${x.result}` })
     if (isBranch(e.instr.op)) {
-      lines.push({ text: `Branch in EX (Fig. 4.51): **Zero = ${x.zero}** (${x.aluA} ${x.zero ? '=' : '≠'} ${x.aluB}). The branch adder computes PC + 4 + offset × 4 = ${e.pc4} + ${e.imm} × 4 = **${x.target}** (shift left 2 then add). Both go into EX/MEM; the decision is made in MEM next cycle.`, tone: 'branch' })
+      lines.push({ text: `Branch in EX (Fig. 4.51): **Zero = ${x.zero}** (${x.aluA} ${x.zero ? '=' : '≠'} ${x.aluB}). The branch adder computes PC + 4 + offset × 4 = ${e.pc4} + ${e.imm} × 4 = **${x.target}** (shift left 2 then add). Both go into EX/MEM; the decision is made in MEM next cycle.`, tone: 'branch', at: 'brAdder', label: `target ${x.target}` })
       lines.push({ text: `Meanwhile two more instructions have entered behind the branch (in ID and IF).`, tone: 'muted' })
     }
     if (e.ctrl.MemWrite) lines.push({ text: `Store data: the ForwardB mux output (${x.writeData}) goes into EX/MEM as the data memory write data.`, at: 'exmem' })
@@ -296,6 +296,8 @@ function execute(sim: Simulation, c: Cycle): Explanation {
 function cmpLines(f: CmpFwd): Line {
   const name = f.field === 'Rs' ? 'Comparator input 1 (ForwardC)' : 'Comparator input 2 (ForwardD)'
   return {
+    at: f.field === 'Rs' ? 'fwdC' : 'fwdD',
+    label: f.sel ? `${f.field === 'Rs' ? 'ForwardC' : 'ForwardD'} = 1` : undefined,
     text: `${name} (IF/ID.Register${f.field} = ${regName(f.reg)}): forward from EX/MEM? (slide 79)`,
     checks: cond(f.check, `IF/ID.Register${f.field}`, f.reg),
     result: f.sel ? `forward ${f.value}` : 'false',
@@ -312,42 +314,46 @@ function branchStep(sim: Simulation, c: Cycle): Explanation {
     const p = [c.at.ifid, c.at.idex, c.at.exmem].find((x) => x && !x.squashed && !('bubble' in x && x.bubble) && isBranch(x.instr.op))!
     const where = p === c.at.ifid ? 'ID' : p === c.at.idex ? 'EX' : 'MEM'
     lines.push({ text: `${who(p.instr)} is in **${where}** and is decided only in MEM. **Stall on branch**: the pipeline does not guess.`, tone: 'flush' })
-    if (c.fetch.instr) lines.push({ text: `IF fetched ${who(c.fetch.instr)}, but it might be the wrong instruction. At the next edge IF.Flush throws it away (IF/ID ← nop) and the PC stays at ${c.next.pc}.`, tone: 'flush' })
+    if (c.fetch.instr) lines.push({ text: `IF fetched ${who(c.fetch.instr)}, but it might be the wrong instruction. At the next edge IF.Flush throws it away (IF/ID ← nop) and the PC stays at ${c.next.pc}.`, tone: 'flush', at: 'flush', label: 'IF.Flush = 1' })
     return { title: `Branch: waiting for ${p.instr.text} (stall on branch)`, tone: 'flush', lines }
   }
   const i = b.instr
   const cond_ = i.op === 'beq' ? 'equal' : 'not equal'
+  // "PC ← …" is pinned on the PC mux when the camera shows the whole sheet (MEM); in ID, where the AND gate sits
+  // right next to the comparator, the decision lines share the comparator's pin.
+  const pcAt: Unit = b.at === 'mem' ? 'pcMux' : 'cmp'
   if (b.at === 'id') {
-    lines.push({ text: `Target adder in ID (slide 78): PC + 4 + offset × 4 = ${b.pc4} + ${i.imm} × 4 = **${b.target}**. The offset is shifted left 2 because it counts words.`, tone: 'branch' })
+    lines.push({ text: `Target adder in ID (slide 78): PC + 4 + offset × 4 = ${b.pc4} + ${i.imm} × 4 = **${b.target}**. The offset is shifted left 2 because it counts words.`, tone: 'branch', at: 'brAdder', label: `target ${b.target}` })
     lines.push(cmpLines(b.fa!), cmpLines(b.fb!))
-    lines.push({ text: `Comparator: ${b.a} ${b.equal ? '=' : '≠'} ${b.b} → Equal = ${+b.equal}. ${q(i)} branches if the registers are ${cond_}: **${b.taken ? 'taken' : 'not taken'}**.`, tone: 'branch' })
-    lines.push({ text: `PCSrc = Branch AND ${i.op === 'beq' ? 'Equal' : 'NOT Equal'} = ${+b.taken}.`, tone: b.taken ? 'branch' : undefined })
+    lines.push({ text: `Comparator: ${b.a} ${b.equal ? '=' : '≠'} ${b.b} → Equal = ${+b.equal}. ${q(i)} branches if the registers are ${cond_}: **${b.taken ? 'taken' : 'not taken'}**.`, tone: 'branch', at: 'cmp', label: `${b.a} ${b.equal ? '=' : '≠'} ${b.b} → ${b.taken ? 'taken' : 'not taken'}` })
+    lines.push({ text: `PCSrc = Branch AND ${i.op === 'beq' ? 'Equal' : 'NOT Equal'} = ${+b.taken}.`, tone: b.taken ? 'branch' : undefined, at: 'cmp' })
   } else {
-    lines.push({ text: `MEM (slide 77, Fig. 4.51): EX/MEM.Branch = 1, EX/MEM.Zero = ${+b.equal} (computed in EX last cycle). PCSrc = Branch AND ${i.op === 'beq' ? 'Zero' : 'NOT Zero'} = **${+b.taken}**: ${b.taken ? 'taken' : 'not taken'}.`, tone: 'branch' })
+    lines.push({ text: `MEM (slide 77, Fig. 4.51): EX/MEM.Branch = 1, EX/MEM.Zero = ${+b.equal} (computed in EX last cycle). PCSrc = Branch AND ${i.op === 'beq' ? 'Zero' : 'NOT Zero'} = **${+b.taken}**: ${b.taken ? 'taken' : 'not taken'}.`, tone: 'branch', at: 'brAnd', label: `PCSrc = ${+b.taken}` })
   }
   if (policy === 'stall') {
-    if (c.fetch.instr) lines.push({ text: `Stall on branch: the instruction IF fetched this cycle (${who(c.fetch.instr)}) is thrown away anyway.`, tone: 'flush' })
-    lines.push({ text: b.taken ? `At the next edge **PC ← ${b.target}** (the target).` : `At the next edge **PC ← ${b.pc4}** (the instruction after the branch, fetched now that we know).`, tone: 'branch' })
+    if (c.fetch.instr) lines.push({ text: `Stall on branch: the instruction IF fetched this cycle (${who(c.fetch.instr)}) is thrown away anyway.`, tone: 'flush', at: 'flush', label: 'IF.Flush = 1' })
+    lines.push({ text: b.taken ? `At the next edge **PC ← ${b.target}** (the target).` : `At the next edge **PC ← ${b.pc4}** (the instruction after the branch, fetched now that we know).`, tone: 'branch', at: pcAt, label: `PC ← ${b.taken ? b.target : b.pc4}` })
     const lost = sim.hw.branch === 'mem' ? 3 : 1
     lines.push({ text: `Cost: ${lost} cycle${lost > 1 ? 's' : ''} lost on every branch, taken or not (slide ${sim.hw.branch === 'mem' ? 26 : 27}).`, tone: 'muted' })
     return { title: `Branch decided in ${b.at.toUpperCase()}: ${b.taken ? 'taken' : 'not taken'}`, tone: 'branch', lines }
   }
   if (!b.taken) {
-    lines.push({ text: `Not taken, so the guess (**predict not taken**, slide 29) was right. The instructions already fetched after the branch are the correct ones. Nothing is flushed, no cycle lost.`, tone: 'branch' })
+    lines.push({ text: `Not taken, so the guess (**predict not taken**, slide 29) was right. The instructions already fetched after the branch are the correct ones. Nothing is flushed, no cycle lost.`, tone: 'branch', at: b.at === 'mem' ? 'brAnd' : 'cmp' })
     return { title: `Branch decided in ${b.at.toUpperCase()}: not taken, prediction correct`, tone: 'branch', lines }
   }
   if (policy === 'delayed') {
-    lines.push({ text: `At the next edge **PC ← ${b.target}**. **Delayed branch** (slide 31): the instruction right after the branch, ${c.fetch.instr ? who(c.fetch.instr) : 'the delay slot'}, is in the delay slot and runs anyway. Nothing is flushed. The compiler must put an instruction there that is correct on both paths (or a nop).`, tone: 'branch' })
+    lines.push({ text: `At the next edge **PC ← ${b.target}**. **Delayed branch** (slide 31): the instruction right after the branch, ${c.fetch.instr ? who(c.fetch.instr) : 'the delay slot'}, is in the delay slot and runs anyway. Nothing is flushed. The compiler must put an instruction there that is correct on both paths (or a nop).`, tone: 'branch', at: pcAt, label: `PC ← ${b.target}` })
     return { title: 'Branch decided in ID: taken, delay slot runs', tone: 'branch', lines }
   }
-  lines.push({ text: `Taken, but IF kept fetching in order (predict not taken). At the next edge **PC ← ${b.target}**, and what came in after the branch is on the wrong path:`, tone: 'flush' })
   const s = c.squash!
-  if (s.ifid && c.fetch.instr) lines.push({ text: `**IF.Flush = 1**: ${who(c.fetch.instr)} (in IF) becomes a nop in IF/ID.`, tone: 'flush' })
+  const flushLabel = [s.ifid && 'IF', s.idex && 'ID', s.exmem && 'EX'].filter(Boolean).join(' / ') + '.Flush = 1'
+  lines.push({ text: `Taken, but IF kept fetching in order (predict not taken). At the next edge **PC ← ${b.target}**, and what came in after the branch is on the wrong path:`, tone: 'flush', at: b.at === 'mem' ? 'pcMux' : 'flush', label: b.at === 'mem' ? `PC ← ${b.target}` : undefined })
+  if (s.ifid && c.fetch.instr) lines.push({ text: `**IF.Flush = 1**: ${who(c.fetch.instr)} (in IF) becomes a nop in IF/ID.`, tone: 'flush', at: 'flush', label: flushLabel })
   if (b.at === 'mem') {
     const d = c.at.ifid, e = c.at.idex
-    if (d) lines.push({ text: `**ID.Flush = 1**: ${slot(d)} (in ID) gets all-zero controls in ID/EX.`, tone: 'flush' })
-    if (e) lines.push({ text: `**EX.Flush = 1**: ${slot(e)} (in EX) gets all-zero controls in EX/MEM.`, tone: 'flush' })
-    if (c.hazard.overridden) lines.push({ text: `The hazard detection unit asked for a stall this cycle, but the flush wins: the stalled instruction is on the wrong path anyway.`, tone: 'muted' })
+    if (d) lines.push({ text: `**ID.Flush = 1**: ${slot(d)} (in ID) gets all-zero controls in ID/EX.`, tone: 'flush', at: 'flush', label: flushLabel })
+    if (e) lines.push({ text: `**EX.Flush = 1**: ${slot(e)} (in EX) gets all-zero controls in EX/MEM.`, tone: 'flush', at: 'flush', label: flushLabel })
+    if (c.hazard.overridden) lines.push({ text: `The hazard detection unit asked for a stall this cycle, but the flush wins: the stalled instruction is on the wrong path anyway.`, tone: 'muted', at: 'hdu' })
   }
   const lost = (b.at === 'mem' ? 3 : 1)
   lines.push({ text: `None of them wrote anything yet: registers and memory are written only in MEM and WB, so throwing them away is safe. Cost: **${lost} cycle${lost > 1 ? 's' : ''}** lost (slide ${b.at === 'mem' ? 77 : 78}).`, tone: 'muted' })

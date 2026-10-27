@@ -23,11 +23,13 @@ export function Chip({ i, bubble, gone }: { i: Instr | null | undefined; bubble?
   return <span className="pl-chip" style={{ background: instrColor(i) }}>I{i.id + 1}</span>
 }
 
-const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`
+export const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`
 
 // ---------- lessons ----------
 
 export type Lesson = {
+  /** Its address (#/path), for the section menu. */
+  path: string
   crumb: string
   title: string
   examples: (Example & { hw?: Hardware })[]
@@ -37,13 +39,15 @@ export type Lesson = {
 }
 
 export const DATA_LESSON: Lesson = {
+  path: 'data-hazards',
   crumb: 'Chapter 4 Part 2 · slides 52–75',
   title: 'Data hazards: forwarding, hazard detection and stalls',
   examples: EXAMPLES,
   initial: 9,
   branches: false,
 }
-const CONTROL_LESSON: Lesson = {
+export const CONTROL_LESSON: Lesson = {
+  path: 'control-hazards',
   crumb: 'Chapter 4 Part 2 · slides 25–31 and 77–81',
   title: 'Control hazards: branches, flushes and branch stalls',
   examples: BRANCH_EXAMPLES,
@@ -51,13 +55,11 @@ const CONTROL_LESSON: Lesson = {
   branches: true,
 }
 
-export const ControlHazardLab = () => <PipelineLab lesson={CONTROL_LESSON} />
-
-const WHERE: Record<BranchAt, { label: string; slide: string; text: string }> = {
+export const WHERE: Record<BranchAt, { label: string; slide: string; text: string }> = {
   mem: { label: 'MEM', slide: 'slide 77 · Fig. 4.51', text: 'The ALU compares (Zero) and an adder in EX computes the target; PCSrc = Branch AND Zero in MEM.' },
   id: { label: 'ID', slide: 'slide 78 · Fig. 4.62', text: 'A register comparator and the target adder sit in ID, with EX/MEM forwarding into the comparator.' },
 }
-const POLICY: Record<Policy, { label: string; slide: string; text: string }> = {
+export const POLICY: Record<Policy, { label: string; slide: string; text: string }> = {
   predict: { label: 'Predict not taken', slide: 'slides 28–29', text: 'Keep fetching in order. Flush only if the branch turns out taken.' },
   stall: { label: 'Stall on branch', slide: 'slides 26–27', text: 'Throw away every fetch until the branch is decided, taken or not.' },
   delayed: { label: 'Delayed branch', slide: 'slide 31', text: 'The instruction after the branch (delay slot) always runs. Needs the decision in ID.' },
@@ -130,14 +132,14 @@ function StartBar({ onStart, branches }: { onStart: () => void; branches: boolea
 }
 
 /** Why the hazard detection unit stalled in this cycle, in a few words. */
-function stallCause(c: Cycle): string {
+export function stallCause(c: Cycle): string {
   const b = c.hazard.branch
   if (b?.stall && !c.hazard.loadUse) return b.loadRs || b.loadRt ? `a load in MEM is still reading ${regName(b.exmemRd)} (slides 80–81)` : `the ALU result ${regName(b.idexDest)} is still being computed in EX (slide 80)`
   if (b?.stall) return `the load in EX writes ${regName(c.hazard.idexRt)}: first of two stalls (slide 81)`
   return `${c.at.idex!.instr.text} is a load into ${regName(c.hazard.idexRt)} (slide 69)`
 }
 
-const ALL_HW: Hardware[] = [
+export const ALL_HW: Hardware[] = [
   { branch: 'mem', policy: 'stall' }, { branch: 'mem', policy: 'predict' },
   { branch: 'id', policy: 'stall' }, { branch: 'id', policy: 'predict' }, { branch: 'id', policy: 'delayed' },
 ]
@@ -808,7 +810,15 @@ export function DataRules() {
   </section>
 }
 
-function BranchRules() {
+export const BRANCH_STALL_RULE = `if (IF/ID is a branch and
+    ((ID/EX.RegWrite and ID/EX.dest ≠ 0 and
+      ID/EX.dest = IF/ID.RegisterRs or IF/ID.RegisterRt)
+  or (EX/MEM.MemRead and EX/MEM.RegisterRd ≠ 0 and
+      EX/MEM.RegisterRd = IF/ID.RegisterRs or IF/ID.RegisterRt)))
+  stall the pipeline   (same stall as slide 72)
+ID/EX.dest = RegDst ? Rd : Rt`
+
+export function BranchRules() {
   return <section className="pl-panel eqs pl-rules">
     <div>
       <h3>Branch decided in MEM · slide 77, Fig. 4.51</h3>
@@ -838,13 +848,7 @@ read in the 2nd half.`}</pre>
     </div>
     <div>
       <h3>Hazard detection for branches · slides 80–81</h3>
-      <pre>{`if (IF/ID is a branch and
-    ((ID/EX.RegWrite and ID/EX.dest ≠ 0 and
-      ID/EX.dest = IF/ID.RegisterRs or IF/ID.RegisterRt)
-  or (EX/MEM.MemRead and EX/MEM.RegisterRd ≠ 0 and
-      EX/MEM.RegisterRd = IF/ID.RegisterRs or IF/ID.RegisterRt)))
-  stall the pipeline   (same stall as slide 72)
-ID/EX.dest = RegDst ? Rd : Rt`}</pre>
+      <pre>{BRANCH_STALL_RULE}</pre>
       <ul className="plain-steps">
         <li>ALU instruction 2 or 3 before the branch: no stall (forward from EX/MEM, or register file).</li>
         <li>ALU instruction right before, or lw 2 before: 1 stall.</li>

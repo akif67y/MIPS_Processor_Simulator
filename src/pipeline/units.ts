@@ -2,19 +2,23 @@
 // the camera frames them, pins point at them and inspect cards open next to them.
 // Coordinates are the base sheet of PipelineDatapath (2100 × 1280, data-hazard layout);
 // `warp` applies the same x shift the drawing uses when branch hardware widens the sheet.
+// The branch hardware itself is drawn in final coordinates, so its units are not warped.
 
-import type { Hardware } from './engine'
+import type { BranchAt, Hardware } from './engine'
 
 export type Unit =
   | 'pc' | 'imem' | 'ifid' | 'control' | 'stallMux' | 'regs' | 'rfWrite' | 'rfRead' | 'signext' | 'hdu'
   | 'idex' | 'muxA' | 'muxB' | 'aluSrc' | 'alu' | 'aluCtl' | 'regDst' | 'fu' | 'exmem' | 'dmem' | 'memwb' | 'wbMux'
+  | BranchUnit
+/** Units that exist only with branch hardware (control hazards). */
+type BranchUnit = 'pcMux' | 'brAdder' | 'brAnd' | 'cmp' | 'fwdC' | 'fwdD' | 'flush'
 
 export type Box = { x: number; y: number; w: number; h: number }
 /** `box` is what the camera frames; `pin` is where a pin sits. */
 type UnitGeo = { box: Box; pin: [number, number]; name: string }
 
 const BOTTOM = 1025
-const U: Record<Unit, UnitGeo> = {
+const U: Record<Exclude<Unit, BranchUnit>, UnitGeo> = {
   pc: { box: { x: 60, y: 560, w: 60, h: 140 }, pin: [90, 560], name: 'PC' },
   imem: { box: { x: 170, y: 520, w: 200, h: 240 }, pin: [270, 520], name: 'Instruction memory' },
   ifid: { box: { x: 400, y: 270, w: 40, h: BOTTOM - 270 }, pin: [420, 300], name: 'IF/ID' },
@@ -39,6 +43,30 @@ const U: Record<Unit, UnitGeo> = {
   wbMux: { box: { x: 1990, y: 622, w: 40, h: 306 }, pin: [2010, 624], name: 'MemtoReg mux' },
 }
 
+const PC_MUX: UnitGeo = { box: { x: -120, y: 560, w: 40, h: 140 }, pin: [-100, 562], name: 'PC mux' }
+const BRANCH: Record<BranchAt, Partial<Record<BranchUnit, UnitGeo>>> = {
+  // Fig. 4.51: target adder in EX, PCSrc = Branch AND Zero in MEM, three flush lines from the band above the sheet.
+  mem: {
+    pcMux: PC_MUX,
+    brAdder: { box: { x: 1120, y: 400, w: 80, h: 120 }, pin: [1160, 402], name: 'Branch adder' },
+    brAnd: { box: { x: 1888, y: 398, w: 46, h: 54 }, pin: [1911, 400], name: 'Branch AND Zero' },
+    flush: { box: { x: 420, y: -12, w: 1390, h: 322 }, pin: [430, 100], name: 'IF.Flush, ID.Flush, EX.Flush' },
+  },
+  // Fig. 4.62: comparator with ForwardC / ForwardD muxes, target adder and AND gate in ID; IF.Flush only.
+  id: {
+    pcMux: PC_MUX,
+    brAdder: { box: { x: 1360, y: 735, w: 65, h: 140 }, pin: [1392, 873], name: 'Branch adder' }, // pinned at its foot, clear of ForwardD's label
+    brAnd: { box: { x: 1240, y: 600, w: 48, h: 54 }, pin: [1264, 602], name: 'Branch AND Equal' },
+    cmp: { box: { x: 1135, y: 574, w: 60, h: 112 }, pin: [1165, 576], name: 'Comparator' },
+    fwdC: { box: { x: 1045, y: 446, w: 44, h: 88 }, pin: [1067, 448], name: 'ForwardC mux' },
+    fwdD: { box: { x: 1045, y: 728, w: 44, h: 88 }, pin: [1067, 730], name: 'ForwardD mux' },
+    flush: { box: { x: 420, y: -12, w: 20, h: 282 }, pin: [430, 100], name: 'IF.Flush' },
+  },
+}
+const isBranchUnit = (u: Unit): u is BranchUnit => !(u in U)
+/** A branch unit on a sheet without it falls back to the PC (it is never pinned there). */
+const branchGeo = (u: BranchUnit, hw: Hardware) => (hw.branch && BRANCH[hw.branch][u]) || U.pc
+
 /** The x shift PipelineDatapath applies for branch hardware (identity without it). */
 export function warp(hw: Hardware) {
   const DX = hw.branch === 'id' ? 480 : hw.branch === 'mem' ? 240 : 0
@@ -48,16 +76,18 @@ export function warp(hw: Hardware) {
 }
 
 export function unitBox(u: Unit, hw: Hardware = {}): Box {
+  if (isBranchUnit(u)) return branchGeo(u, hw).box
   const X = warp(hw)
   const b = U[u].box
   const x0 = X(b.x), x1 = X(b.x + b.w)
   return { x: x0, y: b.y, w: x1 - x0, h: b.h }
 }
 export function unitPin(u: Unit, hw: Hardware = {}): [number, number] {
+  if (isBranchUnit(u)) return branchGeo(u, hw).pin
   const [x, y] = U[u].pin
   return [warp(hw)(x), y]
 }
-export const unitName = (u: Unit) => U[u].name
+export const unitName = (u: Unit, hw: Hardware = {}) => (isBranchUnit(u) ? branchGeo(u, hw).name : U[u].name)
 
 /** The whole sheet without the stage banners (they move into the page's header chips). */
 export function sheetBox(hw: Hardware = {}, banners = true): Box {
